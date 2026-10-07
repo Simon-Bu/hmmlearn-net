@@ -1,0 +1,114 @@
+# Ticket HMM-1. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-1
+title: Utils - normalize, log-normalize and fill covariances
+repo: software-factory/hmmlearn-net
+base: main
+phase: J1
+type: feature
+level: standard
+objective: |
+  Port hmmlearn/utils.py to C#: the static class HmmLearn.Utils with Normalize, LogNormalize and FillCovars, which every later
+  module uses. This is the calibration ticket of the project: the smallest item.
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/utils.py (71 lines), its Python tests
+  reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_utils.py, and the numbers of oracle/golden/utils.json (its structure is
+  described in oracle/README.md; do not open the JSON file whole, it is large).
+scope:
+  writable:
+    - src/HmmLearn/Utils.cs
+  read_only:
+    - src/HmmLearn/CovarianceType.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/CovarianceType.cs (committed, read-only)
+  namespace HmmLearn;
+  public enum CovarianceType { Spherical, Diag, Full, Tied }
+
+  // src/HmmLearn/Utils.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public static class Utils
+  {
+      public static void Normalize(double[] a);
+      public static void Normalize(double[,] a, int? axis = null);            // axis: null (whole matrix), 0 (columns), 1 (rows)
+      public static void LogNormalize(double[] a);
+      public static void LogNormalize(double[,] a, int? axis = null);
+      public static double[,,] FillCovars(double[,,] covars, CovarianceType covarianceType, int nComponents, int nFeatures);
+  }
+
+  Semantics (the XML comments of the stubs say the same):
+  - Normalize divides in place by the sum (of all elements, of each column, or of each row). A sum of 0 is treated as 1: the
+    zeros stay zeros and no NaN appears. An axis other than null, 0 or 1 throws ArgumentOutOfRangeException.
+  - LogNormalize subtracts in place the log-sum-exp (stable: factor out the maximum; if the maximum is infinite it is the
+    log-sum-exp itself). If the chosen axis has length 1, every element becomes 0, even -infinity. A row of -infinity gives NaN.
+    An axis other than null, 0 or 1 throws ArgumentOutOfRangeException.
+  - FillCovars takes the compact covariance shapes of oracle/README.md: spherical (nc,1,1), diag (nc,1,nf), full (nc,nf,nf),
+    tied (1,nf,nf), and returns (nc,nf,nf): spherical = variance times identity, diag = variances on the diagonal and zeros
+    elsewhere, full = the same matrices, tied = the single matrix repeated nc times. A shape that does not match the covariance
+    type, nComponents or nFeatures throws ArgumentException.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-1/, namespace HmmLearn.Tests.Acceptance.Hmm1,
+  exactly these files and classes (xunit 2, `using Xunit` is global):
+  - NormalizeTests.cs     -> class NormalizeTests
+  - LogNormalizeTests.cs  -> class LogNormalizeTests
+  - FillCovarsTests.cs    -> class FillCovarsTests
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("utils") returns the JsonElement of oracle/golden/utils.json.
+  - extension methods of GoldenJson on JsonElement: Items() (elements of an array), AsDouble(), AsVector(), AsMatrix(), AsTensor3(),
+    AsInts(), AsString(), Has(name); a case property is read with element.GetProperty("name").
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12; NaN equals NaN; infinities must be equal).
+  Golden file oracle/golden/utils.json: lists normalize_cases and log_normalize_cases (each case: name, axis (null, 0 or 1),
+  input, expected; input is a vector or a matrix), and fill_covars_cases (each case: name, covariance_type (lowercase string),
+  n_components, n_features, covars, expected).
+constraints:
+  - "Only the .NET base class library: no new package, MathNet.Numerics is not needed here."
+  - "Static, pure methods, no global state, no exception other than those documented in the interface."
+  - "Normalize and LogNormalize change their argument in place and return nothing."
+  - "Only src/HmmLearn/Utils.cs changes. No public member beyond the interface; every public member keeps an XML summary."
+  - "The tests are deterministic: the numbers come from oracle/golden/utils.json through Golden.Load, compared with Close.Equal. Add a few hand-checked cases of your own (in-place behaviour, exceptions) but do not copy golden numbers by hand."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+criteria:
+  - id: C1
+    text: |
+      Utils.Normalize divides in place by the sum, for a vector and for a matrix with axis null, 0 and 1; a zero sum leaves the zeros;
+      an invalid axis throws ArgumentOutOfRangeException. Every case of normalize_cases of oracle/golden/utils.json is reproduced.
+    verify: 'dotnet test tests/HmmLearn.Tests --filter "FullyQualifiedName~HmmLearn.Tests.Acceptance.Hmm1.NormalizeTests"'
+  - id: C2
+    text: |
+      Utils.LogNormalize subtracts the log-sum-exp in place, for a vector and for a matrix with axis null, 0 and 1, including the
+      special cases of the interface (length-1 axis gives zeros, -infinity entries, a row of -infinity gives NaN). Every case of
+      log_normalize_cases of oracle/golden/utils.json is reproduced.
+    verify: 'dotnet test tests/HmmLearn.Tests --filter "FullyQualifiedName~HmmLearn.Tests.Acceptance.Hmm1.LogNormalizeTests"'
+  - id: C3
+    text: |
+      Utils.FillCovars expands the compact covariances of the four covariance types to (nc, nf, nf) matrices and rejects a shape
+      that does not match with ArgumentException. Every case of fill_covars_cases of oracle/golden/utils.json is reproduced.
+    verify: 'dotnet test tests/HmmLearn.Tests --filter "FullyQualifiedName~HmmLearn.Tests.Acceptance.Hmm1.FillCovarsTests"'
+  - id: C4
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet test
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 3
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/utils.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_utils.py
+    - oracle/README.md
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/CovarianceType.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
