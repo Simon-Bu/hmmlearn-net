@@ -1,0 +1,121 @@
+# Ticket HMM-4. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-4
+title: Hmmc forward and backward passes, scaling and log
+repo: software-factory/hmmlearn-net
+base: main
+phase: J1
+type: feature
+level: critical
+objective: |
+  Port the forward and backward passes of ext/_hmmc.cpp (the numerical core of hmmlearn) to C#: HmmLearn.Hmmc.ForwardScaling,
+  ForwardLog, BackwardScaling, BackwardLog and the two log helpers LogSumExp and LogAddExp. Every model uses them.
+  Reference: reference/hmmlearn-0.3.3/ext/_hmmc.cpp lines 9-28 (logaddexp, logsumexp), 46-138 (forward_scaling, forward_log) and
+  140-205 (backward_scaling, backward_log); the Wikipedia example of reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_base.py (class
+  TestBaseAgainstWikipedia); and the numbers of oracle/golden/hmmc.json (structure in oracle/README.md; do not open the JSON file
+  whole, it is large).
+scope:
+  writable:
+    - src/HmmLearn/Hmmc.ForwardBackward.cs
+  read_only:
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/Hmmc.ForwardBackward.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public static partial class Hmmc
+  {
+      internal static double LogAddExp(double a, double b);
+      internal static double LogSumExp(ReadOnlySpan<double> v);
+      public static (double LogProb, double[,] FwdLattice, double[] Scaling) ForwardScaling(double[] startprob, double[,] transmat, double[,] frameprob);
+      public static (double LogProb, double[,] FwdLattice) ForwardLog(double[] startprob, double[,] transmat, double[,] logFrameprob);
+      public static double[,] BackwardScaling(double[] startprob, double[,] transmat, double[,] frameprob, double[] scaling);
+      public static double[,] BackwardLog(double[] startprob, double[,] transmat, double[,] logFrameprob);
+  }
+  (the class is partial: another ticket adds the xi sums and Viterbi in Hmmc.ViterbiXi.cs; internal members are visible to the tests.)
+
+  Semantics: the XML comments of the stubs are the specification; follow the C++ line by line, in particular
+  - forward scaling: rows are rescaled by 1 / (row sum) at every step; LogProb is minus the sum of log(scale); a row sum below
+    1e-300 throws ArithmeticException("forward pass failed with underflow; consider using implementation='log' instead");
+  - forward and backward log: log(0) = -infinity must flow through without NaN; LogSumExp of an all -infinity input is -infinity
+    (the maximum, when infinite, is returned as is);
+  - shapes that do not agree (startprob length nc, transmat nc x nc, scaling length n_samples, at least one sample) throw
+    ArgumentException("shape mismatch").
+  Lattices have shape (n_samples, n_components) with n_samples = number of rows of frameprob.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-4/, namespace HmmLearn.Tests.Acceptance.Hmm4, exactly
+  these files and classes (xunit 2, `using Xunit` is global):
+  - ForwardScalingTests.cs   -> class ForwardScalingTests
+  - ForwardLogTests.cs       -> class ForwardLogTests
+  - BackwardTests.cs         -> class BackwardTests   (both BackwardScaling and BackwardLog)
+  - LogSumExpTests.cs        -> class LogSumExpTests  (LogSumExp and LogAddExp, hand-written values)
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("hmmc") returns the JsonElement of oracle/golden/hmmc.json.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsInts(), AsString(), AsBool(),
+    Has(name); a property is read with element.GetProperty("name").
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12; NaN equals NaN; infinities must be equal).
+  Golden file oracle/golden/hmmc.json: cases, each with name, startprob, transmat, frameprob, log_frameprob and, per function, the
+  expected output: forward_scaling {log_prob, fwdlattice, scaling} or {raises: true}, backward_scaling {bwdlattice} (computed from the
+  scaling vector of the same case), forward_log {log_prob, fwdlattice}, backward_log {bwdlattice}. Other keys of a case (scaling_xi_sum,
+  log_xi_sum, viterbi) belong to another ticket. Use the oracle's own inputs for every call (for BackwardScaling the scaling of the case).
+  Include a hand-written case for shape errors. Numbers can be -Infinity in the oracle (strings are decoded by AsDouble).
+constraints:
+  - "Only the .NET base class library: no new package."
+  - "Static, pure methods and no global state; allocate only the results and one small buffer, never inside the time loop."
+  - "Only src/HmmLearn/Hmmc.ForwardBackward.cs changes. Keep the public signatures above; every public and internal member keeps an XML summary."
+  - "The tests are deterministic: the numbers come from oracle/golden/hmmc.json through Golden.Load, compared with Close.Equal. Do not copy golden numbers by hand; hand-written cases are only for LogSumExp, LogAddExp and shape errors."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes (exact test name, your argument, the fix you propose); never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      Hmmc.ForwardScaling reproduces log_prob, fwdlattice and scaling of every forward_scaling expectation of oracle/golden/hmmc.json
+      (including the Wikipedia example, zeros in the transition matrix and a single sample), throws ArithmeticException for the cases
+      marked raises (an impossible observation), and ArgumentException for inconsistent shapes.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm4.ForwardScalingTests'
+  - id: C2
+    text: |
+      Hmmc.ForwardLog reproduces log_prob and fwdlattice of every forward_log expectation of oracle/golden/hmmc.json, including
+      -infinity log probabilities that must not produce NaN, and throws ArgumentException for inconsistent shapes.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm4.ForwardLogTests'
+  - id: C3
+    text: |
+      Hmmc.BackwardScaling and Hmmc.BackwardLog reproduce bwdlattice of every backward_scaling and backward_log expectation of
+      oracle/golden/hmmc.json, and throw ArgumentException for inconsistent shapes (including a scaling vector of the wrong length).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm4.BackwardTests'
+  - id: C4
+    text: |
+      Hmmc.LogSumExp and Hmmc.LogAddExp are stable: they give log 2 for two zeros, survive values around 1000 and -1000, return the
+      other argument when one is -infinity, and -infinity when all inputs are -infinity.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm4.LogSumExpTests'
+  - id: C5
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/ext/_hmmc.cpp
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_base.py
+    - oracle/README.md
+    - src/HmmLearn/Hmmc.ForwardBackward.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
