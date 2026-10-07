@@ -1,0 +1,6 @@
+.factory/out/
+bin/
+obj/
+TestResults/
+.vs/
+*.user

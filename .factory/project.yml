@@ -1,0 +1,7 @@
+# Project hmmlearn-net: where its verifications run. Schema: AnyMac/formats/schemas/project.schema.json
+version: 1
+verifications:
+  mode: docker
+  image: mcr.microsoft.com/dotnet/sdk:9.0
+  preparation:
+    - dotnet restore
