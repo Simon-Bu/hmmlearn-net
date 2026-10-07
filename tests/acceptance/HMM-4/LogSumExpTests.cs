@@ -37,7 +37,7 @@ public class LogSumExpTests
 
         Close.Equal(1000.0 + Math.Log(2.0), Hmmc.LogSumExp(new double[] { 1000.0, 1000.0 }), "logsumexp([1000, 1000])");
 
-        var nearSmall = -1000.0 + Math.Log(1.0 + Math.Exp(-1.0)); // (-1000, -999)
+        var nearSmall = -999.0 + Math.Log(1.0 + Math.Exp(-1.0)); // (-1000, -999): the maximum is -999
         var small = Hmmc.LogSumExp(new double[] { -1000.0, -999.0 });
         Close.Equal(nearSmall, small, "logsumexp([-1000, -999])");
         Assert.True(double.IsFinite(small), "no underflow around -1000");
@@ -51,7 +51,7 @@ public class LogSumExpTests
     public void LogAddExp_survives_values_around_1000_and_minus_1000()
     {
         var nearBig = 1000.0 + Math.Log(1.0 + Math.Exp(-1.0));
-        var nearSmall = -1000.0 + Math.Log(1.0 + Math.Exp(-1.0));
+        var nearSmall = -999.0 + Math.Log(1.0 + Math.Exp(-1.0)); // (-1000, -999): the maximum is -999
         Close.Equal(nearBig, Hmmc.LogAddExp(1000.0, 999.0), "logaddexp(1000, 999)");
         Close.Equal(nearBig, Hmmc.LogAddExp(999.0, 1000.0), "logaddexp(999, 1000)");
         Close.Equal(1000.0 + Math.Log(2.0), Hmmc.LogAddExp(1000.0, 1000.0), "logaddexp(1000, 1000)");
