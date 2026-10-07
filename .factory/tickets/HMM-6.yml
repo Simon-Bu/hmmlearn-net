@@ -1,0 +1,115 @@
+# Ticket HMM-6. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-6
+title: ConvergenceMonitor
+repo: software-factory/hmmlearn-net
+base: main
+phase: J1
+type: feature
+level: standard
+objective: |
+  Port ConvergenceMonitor of hmmlearn/base.py (lines 21-126) to C#: HmmLearn.ConvergenceMonitor, which the EM loop of every model
+  uses to record log probabilities, report them and decide when to stop.
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/base.py lines 21-126, its Python tests reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_base.py
+  (class TestMonitor), and the numbers of oracle/golden/monitor.json (structure in oracle/README.md).
+scope:
+  writable:
+    - src/HmmLearn/ConvergenceMonitor.cs
+  read_only:
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/ConvergenceMonitor.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public class ConvergenceMonitor
+  {
+      public ConvergenceMonitor(double tol, int nIter, bool verbose, TextWriter? output = null);   // output defaults to Console.Error
+      public double Tol { get; set; }
+      public int NIter { get; set; }
+      public bool Verbose { get; set; }
+      public IReadOnlyList<double> History { get; }
+      public int Iter { get; }
+      public event Action<string>? Warning;
+      public void Reset();
+      public void Report(double logProb);
+      public virtual bool Converged { get; }
+  }
+
+  Semantics: the XML comments of the stubs are the specification. In particular
+  - Converged: Iter == NIter, or History has at least two values and last - previous < Tol (so a decrease counts as converged);
+  - the verbose line is "{iter,10} {logProb,16:F8} {delta,16:+0.00000000;-0.00000000}" in spirit, with the invariant culture: for
+    the first report the delta is not a number and is written "+nan" (right-aligned on 16 characters like the others: the line
+    ends with spaces then "+nan"); oracle/golden/monitor.json has the exact lines (stderr_lines) of five scenarios;
+  - nothing is written when Verbose is false;
+  - Warning is raised (before the value is appended) when logProb - previous < -sqrt(2.220446049250313e-16) = -1.4901161193847656e-8;
+    its message starts with "Model is not converging." and contains the current value, the previous one and the delta.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-6/, namespace HmmLearn.Tests.Acceptance.Hmm6, exactly
+  these files and classes (xunit 2, `using Xunit` is global):
+  - ConvergenceTests.cs         -> class ConvergenceTests
+  - VerboseOutputTests.cs       -> class VerboseOutputTests
+  - ResetAndWarningTests.cs     -> class ResetAndWarningTests
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("monitor") returns the JsonElement of oracle/golden/monitor.json.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsInts(), AsString(), AsBool(), Has(name); a
+    property is read with element.GetProperty("name").
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12).
+  Golden file oracle/golden/monitor.json: template, and cases, each with name, tol, n_iter, steps (a list: after reporting log_prob,
+  converged, iter, history are the expected state) and stderr_lines (the lines written when verbose is true, one per report).
+  Verbose output is captured with a StringWriter passed as the constructor's output argument; compare line by line with
+  stderr_lines (string equality).
+constraints:
+  - "Only the .NET base class library: no new package."
+  - "Only src/HmmLearn/ConvergenceMonitor.cs changes. No public member beyond the interface; every public member keeps an XML summary."
+  - "Format numbers with CultureInfo.InvariantCulture (the test machine may use another culture)."
+  - "The tests are deterministic: the numbers and lines come from oracle/golden/monitor.json through Golden.Load. Add hand-written cases for Reset, the Warning event and a subclass that overrides Converged."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes (exact test name, your argument, the fix you propose); never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      After each Report of every scenario of oracle/golden/monitor.json, Converged, Iter and History equal the expected steps
+      (convergence by iteration count, by improvement below the tolerance, by a decrease; never converged).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm6.ConvergenceTests'
+  - id: C2
+    text: |
+      With verbose true the monitor writes exactly the lines of stderr_lines of every scenario to the given TextWriter (including the
+      "+nan" of the first line and the alignment); with verbose false it writes nothing.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm6.VerboseOutputTests'
+  - id: C3
+    text: |
+      Reset empties the history and sets Iter to 0; the Warning event is raised exactly when a report is lower than the previous one by
+      more than about 1.49e-8 (not for an improvement, not for a tiny decrease); a subclass can override Converged.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm6.ResetAndWarningTests'
+  - id: C4
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/base.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_base.py
+    - oracle/README.md
+    - src/HmmLearn/ConvergenceMonitor.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
