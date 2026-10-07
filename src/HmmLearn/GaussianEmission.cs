@@ -115,8 +115,8 @@ internal static class GaussianEmission
 
     /// <summary>
     /// One observation (n_features numbers) drawn from the Gaussian of <paramref name="state"/>: its mean plus L z, with z standard
-    /// normal numbers from <paramref name="random"/> (Box-Muller) and L a Cholesky factor of fullCovars[state]; if the matrix is not
-    /// positive definite (but is positive semi-definite), a factor from its symmetric eigen decomposition, negative eigenvalues taken as 0.
+    /// normal numbers from <paramref name="random"/> (Box-Muller) and L the lower Cholesky factor of fullCovars[state]. Throws
+    /// <see cref="InvalidOperationException"/> if the matrix is not positive definite.
     /// </summary>
     internal static double[] GenerateSample(double[,] means, double[,,] fullCovars, int state, Random random)
     {
@@ -126,7 +126,7 @@ internal static class GaussianEmission
             for (var j = 0; j < nf; j++)
                 covar[i, j] = fullCovars[state, i, j];
 
-        var factor = Cholesky(covar) ?? EigenspaceFactor(covar);
+        var factor = Cholesky(covar) ?? throw new InvalidOperationException($"the covariance of state {state} is not positive definite");
 
         var z = new double[nf];
         var hasSpare = false;
@@ -198,28 +198,6 @@ internal static class GaussianEmission
                     factor[i, j] = sum / factor[j, j];
                 }
             }
-        }
-        return factor;
-    }
-
-    /// <summary>
-    /// A factor L with L L^T = a with the negative eigenvalues of a taken as 0: from the symmetric eigen decomposition a = V D V^T,
-    /// L = D^{1/2} V^T (the columns of V are the eigenvectors).
-    /// </summary>
-    private static double[,] EigenspaceFactor(double[,] a)
-    {
-        var n = a.GetLength(0);
-        var matrix = Matrix<double>.Build.Dense(n, n);
-        for (var i = 0; i < n; i++)
-            for (var j = 0; j < n; j++)
-                matrix[i, j] = a[i, j];
-        var evd = matrix.Evd(Symmetricity.Symmetric);
-        var factor = new double[n, n];
-        for (var i = 0; i < n; i++)
-        {
-            var scale = Math.Sqrt(Math.Max(evd.EigenValues[i].Real, 0.0));
-            for (var j = 0; j < n; j++)
-                factor[i, j] = scale * evd.EigenVectors[j, i];
         }
         return factor;
     }
