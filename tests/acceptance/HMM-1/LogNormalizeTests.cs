@@ -57,7 +57,7 @@ public class LogNormalizeTests
     {
         var large = new double[] { 1000.0, 1000.0 };
         Utils.LogNormalize(large);
-        Close.Equal(new double[] { 1000.0 - Math.Log(2.0), 1000.0 - Math.Log(2.0) }, large, "large values");
+        Close.Equal(new double[] { -Math.Log(2.0), -Math.Log(2.0) }, large, "large values");
 
         var small = new double[] { -1000.0, -1000.0 };
         Utils.LogNormalize(small);
@@ -131,7 +131,7 @@ public class LogNormalizeTests
         var rows = new double[,] { { double.NegativeInfinity, 0.0 }, { 0.0, -1.0 } };
         Utils.LogNormalize(rows, 1);
         var rowLse = Math.Log(1.0 + Math.Exp(-1.0)); // LSE of [0, -1]
-        Close.Equal(new double[,] { { double.NegativeInfinity, -rowLse }, { -rowLse, -1.0 - rowLse } }, rows, "row with -infinity");
+        Close.Equal(new double[,] { { double.NegativeInfinity, 0.0 }, { -rowLse, -1.0 - rowLse } }, rows, "row with -infinity");
 
         var columns = new double[,] { { double.NegativeInfinity, 0.0 }, { double.NegativeInfinity, -1.0 } };
         Utils.LogNormalize(columns, 0);

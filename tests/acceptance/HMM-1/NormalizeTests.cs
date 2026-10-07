@@ -99,7 +99,7 @@ public class NormalizeTests
     {
         var byRow = new double[,] { { 0.0, 0.0 }, { 1.0, -1.0 }, { 2.0, 2.0 } };
         Utils.Normalize(byRow, 1);
-        Close.Equal(new double[,] { { 0.0, 0.0 }, { 1.0, -1.0 }, { 1.0, 1.0 } }, byRow, "axis 1");
+        Close.Equal(new double[,] { { 0.0, 0.0 }, { 1.0, -1.0 }, { 0.5, 0.5 } }, byRow, "axis 1");
         Assert.All(byRow.Cast<double>(), v => Assert.False(double.IsNaN(v), "no NaN for zero row sums"));
 
         var byColumn = new double[,] { { 0.0, 1.0 }, { 0.0, 1.0 } };
