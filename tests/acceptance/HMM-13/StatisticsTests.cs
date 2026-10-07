@@ -48,9 +48,9 @@ public class StatisticsTests
 
         protected override void Init(double[,] x, int[] lengths)
         {
-            StartProb = (double[])FitStartProb.Clone();
-            TransMat = (double[,])FitTransMat.Clone();
-            Means = (double[,])FitMeans.Clone();
+            StartProb = (double[])StatisticsTests.FitStartProb.Clone();
+            TransMat = (double[,])StatisticsTests.FitTransMat.Clone();
+            Means = (double[,])StatisticsTests.FitMeans.Clone();
             Covars = (double[,,])Covars(_type).Clone();
             NFeatures = x.GetLength(1);
         }
