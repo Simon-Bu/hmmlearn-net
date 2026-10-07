@@ -27,7 +27,7 @@ logging.disable(logging.CRITICAL)
 np.seterr(all="ignore")
 
 from hmmlearn import _hmmc, _kl_divergence as kl, _utils, hmm, stats, utils, vhmm  # noqa: E402
-from hmmlearn.base import ConvergenceMonitor  # noqa: E402
+from hmmlearn.base import BaseHMM, ConvergenceMonitor  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden")
 RTOL = 1e-6
@@ -422,6 +422,72 @@ def fit_summary(h, x, lengths, parameters):
 
 def sample_with(h, n, seed):
     return h.sample(n, random_state=prng(seed))
+
+
+# ---- BaseHMM with a stub emission ---------------------------------------------------------------------------------------
+
+class StubHMM(BaseHMM):
+    """A BaseHMM whose observations ARE the log frame probabilities (n_samples, n_components): no emission model at all."""
+
+    def _compute_log_likelihood(self, X):
+        return np.array(X, dtype=float)
+
+    def _get_n_fit_scalars_per_param(self):
+        nc = self.n_components
+        return {"s": nc - 1, "t": nc * (nc - 1)}
+
+
+def gen_base():
+    inference, fits = [], []
+
+    def add_inference(name, sp, tm, frameprob, lengths):
+        x = np.log(np.asarray(frameprob, dtype=float))
+
+        def make(impl):
+            h = StubHMM(len(sp), init_params="", implementation=impl)
+            h.startprob_, h.transmat_ = np.array(sp), np.array(tm)
+            return infer(h, x, lengths)
+
+        inference.append({"name": name, "n_components": len(sp), "startprob": sp, "transmat": tm, "X": x, "lengths": lengths,
+                          "expected": both(make)})
+
+    wiki = [[0.9, 0.2], [0.9, 0.2], [0.1, 0.8], [0.9, 0.2], [0.9, 0.2]]
+    add_inference("wikipedia", [0.5, 0.5], [[0.7, 0.3], [0.3, 0.7]], wiki, [5])
+    r = prng(101)
+    sp, tm = distribution(r, 3), stochastic(r, 3, 3)
+    add_inference("three-states-three-sequences", sp, tm, r.rand(13, 3) + 0.02, [7, 1, 5])
+    add_inference("left-to-right-with-zeros", [1.0, 0.0, 0.0], [[0.5, 0.5, 0.0], [0.0, 0.6, 0.4], [0.0, 0.0, 1.0]],
+                  r.rand(9, 3) + 0.05, [9])
+    add_inference("tiny-frame-probabilities", [0.4, 0.6], [[0.7, 0.3], [0.1, 0.9]],
+                  [[0.5, 1e-200], [0.2, 0.3], [1e-200, 0.4], [0.6, 0.1], [0.3, 0.3]], [3, 2])
+    add_inference("uniform-model-reduces-to-a-mixture", [1 / 3.0] * 3, [[1 / 3.0] * 3] * 3, r.rand(6, 3) + 0.05, [6])
+
+    def add_fit(name, constructor, init, frameprob, lengths):
+        x = np.log(np.asarray(frameprob, dtype=float))
+
+        def make(impl):
+            h = StubHMM(init_params="", implementation=impl, **constructor)
+            h.startprob_, h.transmat_ = np.array(init["startprob"]), np.array(init["transmat"])
+            h.fit(x, lengths)
+            return fit_summary(h, x, lengths, {"startprob": lambda m: m.startprob_, "transmat": lambda m: m.transmat_})
+
+        fits.append({"name": name, "constructor": constructor, "init": init, "X": x, "lengths": lengths, "expected": both(make)})
+
+    frames = r.rand(30, 3) + 0.05
+    init = {"startprob": [0.3, 0.3, 0.4], "transmat": [[0.5, 0.3, 0.2], [0.2, 0.6, 0.2], [0.3, 0.3, 0.4]]}
+    base = {"n_components": 3, "params": "st"}
+    add_fit("defaults", dict(base, n_iter=10, tol=1e-2), init, frames, [10, 10, 10])
+    add_fit("tight-tolerance", dict(base, n_iter=40, tol=1e-12), init, frames, [30])
+    add_fit("start-only", dict(base, n_iter=6, tol=1e-12, params="s"), init, frames, [15, 15])
+    add_fit("transitions-only", dict(base, n_iter=6, tol=1e-12, params="t"), init, frames, [15, 15])
+    add_fit("priors-below-one-clip-to-zero", dict(base, n_iter=6, tol=1e-12, startprob_prior=0.2, transmat_prior=0.3), init, frames, [15, 15])
+    add_fit("priors-above-one", dict(base, n_iter=6, tol=1e-12, startprob_prior=3.0, transmat_prior=2.5), init, frames, [15, 15])
+    add_fit("left-to-right-keeps-zeros", dict(base, n_iter=8, tol=1e-12),
+            {"startprob": [1.0, 0.0, 0.0], "transmat": [[0.5, 0.5, 0.0], [0.0, 0.6, 0.4], [0.0, 0.0, 1.0]]}, frames, [10, 10, 10])
+    add_fit("unit-sequences", dict(base, n_iter=5, tol=1e-12), init, frames[:8], [1, 1, 6])
+    add_fit("single-iteration", dict(base, n_iter=1, tol=1e-2), init, frames, [10, 10, 10])
+    write("base", {"module": "BaseHMM with a stub emission (observations are the log frame probabilities)",
+                   "tolerance": {"rtol": RTOL, "atol": ATOL}, "inference_cases": inference, "fit_cases": fits})
 
 
 # ---- CategoricalHMM -------------------------------------------------------------------------------------------------
@@ -892,6 +958,7 @@ if __name__ == "__main__":
     gen_stats()
     gen_hmmc()
     gen_monitor()
+    gen_base()
     gen_categorical()
     gen_multinomial()
     gen_poisson()
