@@ -1,0 +1,167 @@
+# Ticket HMM-8. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-8
+title: AbstractHmm fit - EM loop, E-step and sufficient statistics
+repo: software-factory/hmmlearn-net
+base: main
+phase: J1
+type: feature
+level: critical
+objective: |
+  Port the fitting half of _AbstractHMM of hmmlearn/base.py to C#: AbstractHmm.Fit (the EM loop), the E-step, the base sufficient
+  statistics, the hooks that models override (Init, EstepBegin, InitializeSufficientStatistics, AccumulateSufficientStatistics,
+  DoMStep, ComputeLowerBound, and the "fit" variants of the start probabilities, transition matrix and likelihoods) and the helpers
+  NeedsInit, CheckAndSetNFeatures and CheckSum1, plus the data holder SufficientStatistics. The inference half (Score, Decode,
+  Sample, posteriors) is already merged in AbstractHmm.cs. No concrete model exists yet: the M-step of BaseHmm comes later.
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/base.py lines 453-500 (fit), 502-506, 523-566 (_needs_init,
+  _check_and_set_n_features, _get_n_fit_scalars_per_param, _check_sum_1), 646-778 (_initialize_sufficient_statistics,
+  _accumulate_sufficient_statistics and its scaling and log variants, _do_mstep, _do_estep, _estep_begin, _compute_lower_bound) and
+  873-889 (BaseHMM._fit_scaling and _fit_log, which here live once in AbstractHmm); the numbers of oracle/golden/hmmc.json and
+  oracle/golden/base.json (structure in oracle/README.md; do not open the JSON files whole, they are large).
+scope:
+  writable:
+    - src/HmmLearn/AbstractHmm.Fit.cs
+    - src/HmmLearn/SufficientStatistics.cs
+  read_only:
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/DecoderAlgorithm.cs
+    - src/HmmLearn/Implementation.cs
+    - src/HmmLearn/ConvergenceMonitor.cs
+    - src/HmmLearn/Hmmc.ForwardBackward.cs
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/InternalUtils.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/SufficientStatistics.cs and src/HmmLearn/AbstractHmm.Fit.cs (committed as stubs that throw NotImplementedException)
+  namespace HmmLearn;
+  public class SufficientStatistics
+  {
+      public SufficientStatistics(int nComponents);          // Start = new double[nComponents], Trans = new double[nComponents, nComponents]
+      public int NObs { get; set; }  public double[] Start { get; set; }  public double[,] Trans { get; set; }
+  }
+  public abstract partial class AbstractHmm      // the second file of the class; AbstractHmm.cs is merged and read-only
+  {
+      public AbstractHmm Fit(double[,] x, int[]? lengths = null);
+      protected virtual void Init(double[,] x, int[] lengths);                 // default: throw new NotImplementedException("Must be overridden in subclass")
+      protected virtual void EstepBegin();                                     // default: nothing
+      protected virtual SufficientStatistics InitializeSufficientStatistics(); // default: new SufficientStatistics(NComponents)
+      protected virtual void AccumulateSufficientStatistics(SufficientStatistics stats, double[,] x, double[,] lattice,
+          double[,] posteriors, double[,] fwdlattice, double[,] bwdlattice);
+      protected virtual void DoMStep(SufficientStatistics stats);              // default: nothing
+      protected virtual double ComputeLowerBound(double currLogProb);          // default: throw new NotImplementedException("Must be overridden in subclass")
+      protected virtual double[] FitStartProb { get; }                         // default: StartProb (null-forgiving)
+      protected virtual double[,] FitTransMat { get; }                         // default: TransMat (null-forgiving)
+      protected virtual double[,] ComputeFitLogLikelihood(double[,] x);        // default: ComputeLogLikelihood(x)
+      protected virtual double[,] ComputeFitLikelihood(double[,] x);           // default: ComputeLikelihood(x)
+      protected virtual IReadOnlyDictionary<char, int>? GetNFitScalarsPerParam(); // default: null
+      protected bool NeedsInit(char code, string name, bool isSet);
+      protected virtual void CheckAndSetNFeatures(double[,] x);
+      protected static void CheckSum1(string name, double[] values);
+      protected static void CheckSum1(string name, double[,] values);
+  }
+  Already merged and usable from AbstractHmm.cs: ComputeLogLikelihood, ComputeLikelihood, Check, CheckObservations, RaiseWarning,
+  Monitor, Params, InitParams, Implementation, NIter, Tol, Verbose, StartProb, TransMat, NFeatures,
+  internal static ComputePosteriorsScaling(fwd, bwd) and ComputePosteriorsLog(fwd, bwd).
+
+  The E-step of one sequence (the same code serves every model; the "fit" members above are the only difference for the variational
+  models later):
+  - Implementation.Log: logFrame = ComputeFitLogLikelihood(seq); (logProb, fwd) = Hmmc.ForwardLog(FitStartProb, FitTransMat, logFrame);
+    bwd = Hmmc.BackwardLog(...); posteriors = ComputePosteriorsLog(fwd, bwd); lattice = logFrame.
+  - Implementation.Scaling: frame = ComputeFitLikelihood(seq); (logProb, fwd, scaling) = Hmmc.ForwardScaling(...);
+    bwd = Hmmc.BackwardScaling(..., scaling); posteriors = ComputePosteriorsScaling(fwd, bwd); lattice = frame.
+  Then AccumulateSufficientStatistics(stats, seq, lattice, posteriors, fwd, bwd) and currLogProb += logProb. The sequences come
+  from InternalUtils.SplitXLengths. One E-step: stats = InitializeSufficientStatistics(); EstepBegin(); the sequences; return (stats, currLogProb).
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-8/, namespace HmmLearn.Tests.Acceptance.Hmm8, exactly
+  these files and classes (xunit 2, `using Xunit` is global). The tests define their own small model, for instance
+  `class ToyHmm : AbstractHmm` that implements Check (nothing), ComputeLogLikelihood (a copy of x: the observations ARE the log frame
+  probabilities, n_features = n_components, as in oracle/golden/base.json), GenerateSampleFromState (new[] { (double)state }), overrides
+  Init (sets StartProb, TransMat and NFeatures from fields), ComputeLowerBound (returns the log probability), and records the calls
+  and the SufficientStatistics given to DoMStep:
+  - FitLoopTests.cs          -> class FitLoopTests          (order of the hooks, number of iterations, convergence stop, NIter = 0, monitor values, return value, lengths and input checks)
+  - ExpectationStepTests.cs  -> class ExpectationStepTests  (the statistics given to DoMStep, with both implementations and the Params letters)
+  - FitHelperTests.cs        -> class FitHelperTests        (SufficientStatistics, NeedsInit, CheckAndSetNFeatures, CheckSum1)
+  - FitWarningTests.cs       -> class FitWarningTests       (warnings: the monitor's, the zero-sum row of TransMat)
+  Expected statistics come from the oracle: the "wikipedia" case of oracle/golden/hmmc.json gives frameprob, log_frameprob, startprob,
+  transmat and the xi sums (scaling_xi_sum, and log_xi_sum whose exponential is the same matrix); oracle/golden/base.json
+  "wikipedia" gives the posteriors (expected.posteriors; Start is their first row). Two sequences made of the same oracle sequence twice
+  (lengths [5, 5]) must give twice the statistics of one. Sequences of length 1 add to Start but not to Trans.
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("hmmc") and Golden.Load("base") return the JsonElement of the files.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsInts(), AsString(), AsBool(),
+    Has(name); a property is read with element.GetProperty("name").
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12). A -Infinity value in the oracle is decoded by AsDouble.
+constraints:
+  - "Only the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/AbstractHmm.Fit.cs and src/HmmLearn/SufficientStatistics.cs change. Keep every signature above; every public and protected member keeps an XML summary. No abstract member may be added."
+  - "Do not mutate the caller's x and lengths, nor StartProb and TransMat outside the M-step hook of a model; results are new arrays."
+  - "While fitting, subscribe a handler to Monitor.Warning that forwards to RaiseWarning and unsubscribe it in a finally block, so that the monitor is left as it was found."
+  - "The tests are deterministic: the numbers come from the oracle through Golden.Load, compared with Close.Equal. Do not copy golden numbers by hand."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field (id, verify, description, recommended, test_disputes...) makes the validator refuse the report and costs a whole attempt."
+  - "Keep your reasoning short: one reply that runs out of tokens (max-tokens) loses the whole attempt (HMM-6: 25 minutes of reasoning about the last digit of a formatted number, then nothing written). If a locked test still fails after two fixes and you cannot explain it, stop and write .factory/out/coder.json with status blocked and a question that gives the test, the expected and the actual value: the pilot answers. Never re-derive floating-point or library behaviour from bits: run a one-line experiment with the other API instead (F8 against a custom format string, Math.Round...). Custom numeric format strings round a 15-digit expansion, F8 and G17 are exact."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes (exact test name, your argument, the fix you propose); never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      Fit runs Init, Check, then at most NIter iterations of E-step, ComputeLowerBound, DoMStep and Monitor.Report, stopping after the
+      iteration where Monitor.Converged becomes true (the M-step of that iteration has run); NIter = 0 only initializes and checks;
+      the monitor receives Tol, NIter and Verbose and is reset at the start of each Fit; Monitor.History holds the lower bounds; Fit returns
+      the same instance; lengths null means one sequence; lengths that do not sum to the number of rows, or invalid observations, throw
+      ArgumentException before Init runs.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm8.FitLoopTests'
+  - id: C2
+    text: |
+      The statistics given to DoMStep match the oracle for both implementations: NObs is the number of sequences, Start the sum of the
+      first-sample posteriors, Trans the sum of the xi sums (sequences of length 1 add nothing to Trans), each filled only when 's' (resp.
+      't') is in Params; the lattice given to AccumulateSufficientStatistics holds probabilities with Scaling and log probabilities with Log;
+      the "fit" virtual members are used by the passes (a model overriding FitTransMat sees its matrix in the xi sums).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm8.ExpectationStepTests'
+  - id: C3
+    text: |
+      SufficientStatistics starts at zeros of the right shapes; NeedsInit returns true when the letter is in InitParams (warning when the
+      parameter is already set) or when the parameter is not set, false otherwise; CheckAndSetNFeatures records the number of columns and
+      rejects a different one; CheckSum1 accepts sums equal to 1 within the numpy tolerance and throws ArgumentException otherwise, for
+      vectors and for the rows of matrices.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm8.FitHelperTests'
+  - id: C4
+    text: |
+      A warning raised by the monitor during Fit reaches the Warning subscribers of the model; a TransMat with a row that sums to 0 after
+      an iteration that did not converge raises the zero-sum warning; the monitor is unsubscribed when Fit ends, even when an exception
+      escapes.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm8.FitWarningTests'
+  - id: C5
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/base.py
+    - oracle/README.md
+    - src/HmmLearn/AbstractHmm.Fit.cs
+    - src/HmmLearn/SufficientStatistics.cs
+    - src/HmmLearn/AbstractHmm.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
