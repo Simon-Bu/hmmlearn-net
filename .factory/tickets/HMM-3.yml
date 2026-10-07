@@ -1,0 +1,113 @@
+# Ticket HMM-3. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-3
+title: Stats - log multivariate normal density for the four covariance types
+repo: software-factory/hmmlearn-net
+base: main
+phase: J1
+type: feature
+level: standard
+objective: |
+  Port hmmlearn/stats.py to C#: HmmLearn.Stats.LogMultivariateNormalDensity, the Gaussian emission likelihood used by the Gaussian
+  and mixture models later. Reference: reference/hmmlearn-0.3.3/src/hmmlearn/stats.py (98 lines) and the numbers of
+  oracle/golden/stats.json (structure in oracle/README.md; do not open the JSON file whole). There is no Python test file for it.
+scope:
+  writable:
+    - src/HmmLearn/Stats.cs
+  read_only:
+    - src/HmmLearn/CovarianceType.cs
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/InternalUtils.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/Stats.cs (committed as a stub that throws NotImplementedException; the coder writes the body)
+  namespace HmmLearn;
+  public static class Stats
+  {
+      public static double[,] LogMultivariateNormalDensity(double[,] x, double[,] means, double[,,] covars,
+          CovarianceType covarianceType = CovarianceType.Diag);
+  }
+
+  Semantics (the XML comment of the stub says the same). x is (n, nf), means (nc, nf), the result (n, nc). Compact covariances:
+  spherical (nc,1,1), diag (nc,1,nf), full (nc,nf,nf), tied (1,nf,nf).
+  - Spherical and diag: the variances are first raised to at least 2.2250738585072014E-308 (numpy's finfo(float).tiny); then
+    -0.5 * (nf * log(2 pi) + sum over features of log(variance) + sum over features of (x - mean)^2 / variance); a spherical
+    variance applies to every feature. An overflow gives -infinity, as in numpy.
+  - Full and tied (tied uses its one matrix for every component): Cholesky factor L of the covariance (lower triangular; a pivot that
+    is not strictly positive means "not positive definite"); on failure retry once with 1e-7 added to the diagonal; if it fails
+    again throw ArgumentException with the message "'covars' must be symmetric, positive-definite". Then with L y = (x - mean)
+    (forward substitution) and logdet = 2 * sum of log(L[i,i]): -0.5 * (nf * log(2 pi) + sum of y^2 + logdet).
+    MathNet.Numerics (already referenced) may be used, or a hand-written Cholesky and substitution.
+  - A covariance array whose shape does not match the type and the means, or x with a different number of features than the means,
+    throws ArgumentException.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-3/, namespace HmmLearn.Tests.Acceptance.Hmm3, exactly
+  these files and classes (xunit 2, `using Xunit` is global):
+  - SphericalDiagDensityTests.cs   -> class SphericalDiagDensityTests
+  - FullTiedDensityTests.cs        -> class FullTiedDensityTests
+  - ShapeChecksTests.cs            -> class ShapeChecksTests
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("stats") returns the JsonElement of oracle/golden/stats.json.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsTensor3(), AsInts(), AsString(),
+    AsBool(), Has(name); a property is read with element.GetProperty("name"). A covariance type is the lowercase string of the
+    case: Enum.Parse<CovarianceType>(text, ignoreCase: true).
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12; NaN equals NaN; infinities must be equal).
+  Golden file oracle/golden/stats.json: cases, each with name, covariance_type, X, means, covars (uniform compact shapes) and either
+  expected (an (n, nc) matrix, possibly with "-Infinity") or raises: true. Case names start with the covariance type.
+constraints:
+  - "Only MathNet.Numerics (already referenced) and the .NET base class library: no new package."
+  - "A static, pure method and no global state; no exception other than those documented in the interface."
+  - "Only src/HmmLearn/Stats.cs changes. No public member beyond the interface; every public member keeps an XML summary."
+  - "The tests are deterministic: the numbers come from oracle/golden/stats.json through Golden.Load, compared with Close.Equal (select the cases by the covariance type in the case). Add a few hand-checked cases of your own (shape errors) but do not copy golden numbers by hand."
+  - "Each test class compiles against the stub and FAILS with NotImplementedException from it (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes (exact test name, your argument, the fix you propose); never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      LogMultivariateNormalDensity gives the log density for the spherical and diag covariance types, including the floor on the
+      variances (a zero variance at the mean) and the -infinity overflow case. Every spherical and diag case of oracle/golden/stats.json
+      is reproduced.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm3.SphericalDiagDensityTests'
+  - id: C2
+    text: |
+      LogMultivariateNormalDensity gives the log density for the full and tied covariance types through a Cholesky factor, retries
+      once with 1e-7 on the diagonal when the matrix is singular, and throws ArgumentException when it is still not positive definite.
+      Every full and tied case of oracle/golden/stats.json is reproduced (cases with raises: true expect the exception).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm3.FullTiedDensityTests'
+  - id: C3
+    text: |
+      A covariance array of the wrong shape for its type, or x with a different number of features than the means, throws
+      ArgumentException (hand-written cases).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm3.ShapeChecksTests'
+  - id: C4
+    text: "The code stays readable: short methods, no dead code, the XML summary matches the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/stats.py
+    - oracle/README.md
+    - src/HmmLearn/Stats.cs
+    - src/HmmLearn/CovarianceType.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
