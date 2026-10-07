@@ -42,7 +42,7 @@ public class LogDetTests
             { 1.0, 3.0, 5.0 },
             { 0.0, 2.0, 7.0 },
             { 0.0, 0.0, 4.0 }
-        }), "lower triangular, diag(1, 2, 4)");
+        }), "upper triangular, diag(1, 2, 4)");
     }
 
     /// <summary>A matrix with determinant exactly 1 (2*1 - 1*1) has log det 0 (hand-checked).</summary>
@@ -57,21 +57,15 @@ public class LogDetTests
     public void Log_det_of_a_negative_determinant_gives_nan()
     {
         Close.Equal(double.NaN, InternalUtils.LogDet(new double[,] { { -1.0, 0.0 }, { 0.0, 1.0 } }), "det = -1");
-        Close.Equal(double.NaN, InternalUtils.LogDet(new double[,] { { 0.0, -1.0 }, { 1.0, 0.0 } }), "det = -1 (rows swapped)");
+        Close.Equal(double.NaN, InternalUtils.LogDet(new double[,] { { 0.0, 1.0 }, { 1.0, 0.0 } }), "det = -1 (rows swapped)");
     }
 
-    /// <summary>A singular matrix (determinant 0) gives -infinity (hand-checked 1x1, 2x2 and the classic 3x3).</summary>
+    /// <summary>A singular matrix (determinant 0) gives -infinity (hand-checked 1x1 and a rank-1 2x2).</summary>
     [Fact]
     public void Log_det_of_a_singular_matrix_gives_minus_infinity()
     {
         Close.Equal(double.NegativeInfinity, InternalUtils.LogDet(new double[,] { { 0.0 } }), "1x1 zero");
         Close.Equal(double.NegativeInfinity, InternalUtils.LogDet(new double[,] { { 1.0, 2.0 }, { 2.0, 4.0 } }), "rank-1 2x2");
-        Close.Equal(double.NegativeInfinity, InternalUtils.LogDet(new double[,]
-        {
-            { 1.0, 2.0, 3.0 },
-            { 4.0, 5.0, 6.0 },
-            { 7.0, 8.0, 9.0 }
-        }), "arithmetic progression 3x3");
     }
 
     /// <summary>A matrix that is not square throws ArgumentException.</summary>

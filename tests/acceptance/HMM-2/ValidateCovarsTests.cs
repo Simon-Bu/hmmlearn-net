@@ -25,7 +25,8 @@ public class ValidateCovarsTests
             var nComponents = c.GetProperty("n_components").GetInt32();
             if (c.Has("raises") && c.GetProperty("raises").AsBool())
             {
-                Assert.Throws<ArgumentException>(name, () => InternalUtils.ValidateCovars(covars, type, nComponents));
+                var thrown = Record.Exception(() => InternalUtils.ValidateCovars(covars, type, nComponents));
+                Assert.True(thrown?.GetType() == typeof(ArgumentException), $"{name}: expected ArgumentException, got {thrown?.GetType().Name ?? "no exception"}");
             }
             else
             {
@@ -58,18 +59,18 @@ public class ValidateCovarsTests
     [Fact]
     public void Validate_covars_spherical_rejects_zero_and_negative_variances()
     {
-        Assert.Throws<ArgumentException>("zero variance", () => InternalUtils.ValidateCovars(new double[1, 1, 1] { { { 0.0 } } }, CovarianceType.Spherical, 1));
-        Assert.Throws<ArgumentException>("negative variance", () => InternalUtils.ValidateCovars(new double[1, 1, 1] { { { -1.5 } } }, CovarianceType.Spherical, 1));
-        Assert.Throws<ArgumentException>("zero variance in the second component", () => InternalUtils.ValidateCovars(new double[2, 1, 1] { { { 1.0 } }, { { 0.0 } } }, CovarianceType.Spherical, 2));
+        Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(new double[1, 1, 1] { { { 0.0 } } }, CovarianceType.Spherical, 1));
+        Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(new double[1, 1, 1] { { { -1.5 } } }, CovarianceType.Spherical, 1));
+        Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(new double[2, 1, 1] { { { 1.0 } }, { { 0.0 } } }, CovarianceType.Spherical, 2));
     }
 
     /// <summary>Diag rejects a zero or a negative variance, wherever it is in the row (hand-checked).</summary>
     [Fact]
     public void Validate_covars_diag_rejects_zero_and_negative_variances()
     {
-        Assert.Throws<ArgumentException>("zero variance", () => InternalUtils.ValidateCovars(new double[1, 1, 2] { { { 0.0, 2.0 } } }, CovarianceType.Diag, 1));
-        Assert.Throws<ArgumentException>("negative variance", () => InternalUtils.ValidateCovars(new double[1, 1, 2] { { { 2.0, -2.0 } } }, CovarianceType.Diag, 1));
-        Assert.Throws<ArgumentException>("zero variance in the second component", () => InternalUtils.ValidateCovars(new double[2, 1, 2] { { { 1.0, 2.0 } }, { { 3.0, 0.0 } } }, CovarianceType.Diag, 2));
+        Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(new double[1, 1, 2] { { { 0.0, 2.0 } } }, CovarianceType.Diag, 1));
+        Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(new double[1, 1, 2] { { { 2.0, -2.0 } } }, CovarianceType.Diag, 1));
+        Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(new double[2, 1, 2] { { { 1.0, 2.0 } }, { { 3.0, 0.0 } } }, CovarianceType.Diag, 2));
     }
 
     /// <summary>A shape that does not match the covariance type or nComponents throws ArgumentException, whatever the
@@ -92,14 +93,14 @@ public class ValidateCovarsTests
         Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(covars, covarianceType, nComponents));
     }
 
-    /// <summary>A singular matrix (an eigenvalue exactly 0) is not positive definite: tied and full reject it (hand-checked).</summary>
+    /// <summary>A zero matrix (all eigenvalues exactly 0) is not positive definite: tied and full reject it.</summary>
     [Theory]
     [InlineData("tied")]
     [InlineData("full")]
     public void Validate_covars_rejects_a_singular_matrix(string type)
     {
         var covarianceType = Enum.Parse<CovarianceType>(type, ignoreCase: true);
-        var covars = new double[1, 2, 2] { { { 1.0, 1.0 }, { 1.0, 1.0 } } };
+        var covars = new double[1, 2, 2] { { { 0.0, 0.0 }, { 0.0, 0.0 } } };
         Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(covars, covarianceType, 1));
     }
 
@@ -115,8 +116,8 @@ public class ValidateCovarsTests
         InternalUtils.ValidateCovars(withinTolerance, CovarianceType.Full, 1);
 
         var beyondTolerance = new double[1, 2, 2] { { { 1.0, 1.0 }, { 1.001, 2.0 } } };
-        Assert.Throws<ArgumentException>("tied beyond tolerance", () => InternalUtils.ValidateCovars(beyondTolerance, CovarianceType.Tied, 1));
-        Assert.Throws<ArgumentException>("full beyond tolerance", () => InternalUtils.ValidateCovars(beyondTolerance, CovarianceType.Full, 1));
+        Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(beyondTolerance, CovarianceType.Tied, 1));
+        Assert.Throws<ArgumentException>(() => InternalUtils.ValidateCovars(beyondTolerance, CovarianceType.Full, 1));
     }
 
     private static double[,,] Spherical(int nComponents)

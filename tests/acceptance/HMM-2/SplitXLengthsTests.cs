@@ -26,7 +26,8 @@ public class SplitXLengthsTests
             var lengths = lengthsElement.ValueKind == JsonValueKind.Null ? null : lengthsElement.AsInts();
             if (c.Has("raises"))
             {
-                Assert.Throws<ArgumentException>(name, () => InternalUtils.SplitXLengths(x, lengths));
+                var thrown = Record.Exception(() => InternalUtils.SplitXLengths(x, lengths));
+                Assert.True(thrown?.GetType() == typeof(ArgumentException), $"{name}: expected ArgumentException, got {thrown?.GetType().Name ?? "no exception"}");
             }
             else
             {
@@ -80,8 +81,8 @@ public class SplitXLengthsTests
     [Fact]
     public void Split_x_lengths_rejects_negative_lengths_even_when_they_sum_to_the_rows()
     {
-        Assert.Throws<ArgumentException>("[-1, 3] on 2 rows", () => InternalUtils.SplitXLengths(new double[2, 1], new[] { -1, 3 }));
-        Assert.Throws<ArgumentException>("[-1, 5] on 4 rows", () => InternalUtils.SplitXLengths(new double[4, 1], new[] { -1, 5 }));
+        Assert.Throws<ArgumentException>(() => InternalUtils.SplitXLengths(new double[2, 1], new[] { -1, 3 }));
+        Assert.Throws<ArgumentException>(() => InternalUtils.SplitXLengths(new double[4, 1], new[] { -1, 5 }));
     }
 
     /// <summary>Lengths that do not sum to the number of rows throw ArgumentException.</summary>
@@ -99,7 +100,7 @@ public class SplitXLengthsTests
     [Fact]
     public void Split_x_lengths_empty_lengths_sum_to_zero()
     {
-        Assert.Throws<ArgumentException>("empty lengths on 3 rows", () => InternalUtils.SplitXLengths(new double[3, 2], Array.Empty<int>()));
+        Assert.Throws<ArgumentException>(() => InternalUtils.SplitXLengths(new double[3, 2], Array.Empty<int>()));
         Assert.Empty(InternalUtils.SplitXLengths(new double[0, 2], Array.Empty<int>()));
     }
 }
