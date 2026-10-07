@@ -1,0 +1,104 @@
+# Ticket HMM-12. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-12
+title: KMeans - minimal deterministic Lloyd algorithm
+repo: software-factory/hmmlearn-net
+base: main
+phase: J2
+type: feature
+level: standard
+objective: |
+  Write HmmLearn.KMeans, a minimal deterministic k-means (Lloyd's algorithm) used by the default initializations of the Gaussian,
+  mixture and variational Gaussian models (hmmlearn uses scikit-learn's KMeans there; the port does not need to reproduce its results,
+  only to find sensible clusters, deterministically). There is no Python reference file and no oracle: the tests are structural and
+  statistical. The specification is the XML comment of the stub src/HmmLearn/KMeans.cs.
+scope:
+  writable:
+    - src/HmmLearn/KMeans.cs
+  read_only:
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/KMeans.cs (committed as a stub that throws NotImplementedException; the coder writes the body)
+  namespace HmmLearn;
+  public static class KMeans
+  {
+      public static (double[,] Centers, int[] Labels) Fit(double[,] x, int k, int maxIter = 300, double tol = 1e-8);
+  }
+
+  Semantics (the XML comment of the stub says the same):
+  - input x has shape (n_samples, n_features); the result has Centers of shape (k, n_features) and Labels of length n_samples with
+    values 0..k-1;
+  - seeding by the farthest-point rule: the first center is the first row of x, each next center is the row whose distance to its
+    nearest chosen center is the largest (the smallest row index wins a tie); a row identical to a chosen center has distance 0;
+  - Lloyd iterations, at most maxIter: assign each sample to the nearest center (squared Euclidean distance, the smallest center
+    index wins a tie), then move each center to the mean of its samples; a center that lost all its samples takes the sample that is
+    farthest from the center it is currently assigned to (the smallest index wins a tie); stop when no label changes in an iteration
+    or when no center moved by more than tol (Euclidean norm);
+  - the labels returned are consistent with the centers returned: the final assignment step uses the final centers (so a sample
+    is never farther from its center than from another one, up to ties), and each center is the mean of its samples at convergence;
+  - maxIter = 0 returns the seeds and the labels of the nearest seed;
+  - ArgumentException for x without rows or columns, NaN or infinity in x, k below 1 or above the number of rows, maxIter below 0.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-12/, namespace HmmLearn.Tests.Acceptance.Hmm12, exactly
+  these files and classes (xunit 2, `using Xunit` is global):
+  - SeparatedClustersTests.cs  -> class SeparatedClustersTests  (data made of well separated blobs generated with a fixed-seed Random)
+  - LloydInvariantsTests.cs    -> class LloydInvariantsTests    (centers are the means of their samples, each sample goes to its nearest center, results are deterministic)
+  - EdgeCaseTests.cs           -> class EdgeCaseTests           (k = 1, k = n, duplicate points, ties, maxIter = 0, empty cluster recovery, invalid arguments)
+  Make the blobs from `new Random(12345)` with Box-Muller or any standard-normal recipe written in the test; compare partitions
+  (which samples are together), never label numbers; compare centers to the true blob means with a tolerance of a few standard errors.
+  Test support (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support) offers Close.Equal(double, double, string) and
+  Close.Equal(Array, Array, string) with relative tolerance 1e-6 and absolute 1e-12; there is no golden file for this ticket.
+constraints:
+  - "Only the .NET base class library: no new package."
+  - "A static, pure method and no global state, no randomness (the same input gives the same output); do not mutate x."
+  - "Only src/HmmLearn/KMeans.cs changes. Keep the public signature above; every public member keeps an XML summary."
+  - "The tests are deterministic (fixed seeds, no wall clock) and compare partitions, not label numbers."
+  - "Each test class compiles against the stub and FAILS with NotImplementedException from it (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field (id, verify, description, recommended, test_disputes...) makes the validator refuse the report and costs a whole attempt."
+  - "Keep your reasoning short: one reply that runs out of tokens (max-tokens) loses the whole attempt (HMM-6: 25 minutes of reasoning about the last digit of a formatted number, then nothing written). If a locked test still fails after two fixes and you cannot explain it, stop and write .factory/out/coder.json with status blocked and a question that gives the test, the expected and the actual value: the pilot answers. Never re-derive floating-point or library behaviour from bits: run a one-line experiment with the other API instead (F8 against a custom format string, Math.Round...). Custom numeric format strings round a 15-digit expansion, F8 and G17 are exact."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes (exact test name, your argument, the fix you propose); never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      On data made of three or four well separated blobs, KMeans.Fit puts the samples of each blob in the same cluster and the samples of
+      different blobs in different clusters, and its centers are close to the blob means (partitions compared, not label numbers).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm12.SeparatedClustersTests'
+  - id: C2
+    text: |
+      At the end each center is the mean of the samples that carry its label, each sample is at least as close to its own center as to
+      any other, the result is deterministic (same input, same output), and x is left untouched.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm12.LloydInvariantsTests'
+  - id: C3
+    text: |
+      Edge cases: k = 1 gives the mean of the data; k = n gives every sample its own center when the samples are distinct; duplicate
+      points do not break the algorithm; maxIter = 0 returns the farthest-point seeds; a center left without samples is recovered; invalid
+      arguments throw ArgumentException.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm12.EdgeCaseTests'
+  - id: C4
+    text: "The code stays readable: short methods, no dead code, the XML summary matches the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - src/HmmLearn/KMeans.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
