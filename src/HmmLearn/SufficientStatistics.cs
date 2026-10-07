@@ -7,7 +7,12 @@ namespace HmmLearn;
 public class SufficientStatistics
 {
     /// <summary>Allocates <see cref="Start"/> (n_components zeros) and <see cref="Trans"/> (n_components x n_components zeros).</summary>
-    public SufficientStatistics(int nComponents) => throw new NotImplementedException();
+    public SufficientStatistics(int nComponents)
+    {
+        NObs = 0;
+        Start = new double[nComponents];
+        Trans = new double[nComponents, nComponents];
+    }
 
     /// <summary>Number of sequences accumulated so far (hmmlearn's 'nobs').</summary>
     public int NObs { get; set; }
