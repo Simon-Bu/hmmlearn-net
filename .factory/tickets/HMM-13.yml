@@ -123,6 +123,7 @@ constraints:
   - "Only MathNet.Numerics (already referenced), the .NET base class library and the merged HmmLearn code: no new package."
   - "Only src/HmmLearn/GaussianHmm.cs and src/HmmLearn/GaussianEmission.cs change. Keep every signature above; every public, protected and internal member keeps an XML summary. No abstract member may be added."
   - "Do not mutate the arrays a caller passes in; the Covars setter and getter copy."
+  - "Round 2 decision of the pilot (review remark R1): the covariance of a state reaching GaussianEmission.GenerateSample is always positive definite, because the Covars setter rejects everything else. The eigen-decomposition fallback for a positive semi-definite matrix, which the stub's XML comment asked for, is unreachable dead code: DELETE it (and its helper), keep the Cholesky factor and its lower-triangular product, make a failed Cholesky throw InvalidOperationException, and correct the XML summary of GenerateSample so that it matches the behaviour."
   - "The tests are deterministic: the numbers come from the oracle through Golden.Load, compared with Close.Equal; statistical tests use fixed seeds. Do not copy golden numbers by hand."
   - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
   - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
@@ -169,7 +170,7 @@ roles:
 waivers:
   reviewer_same_family: "POC local-only decided by Simon"
 review:
-  max_rounds: 1
+  max_rounds: 2
 context:
   files:
     - reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py
