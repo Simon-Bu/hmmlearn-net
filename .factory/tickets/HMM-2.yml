@@ -1,0 +1,120 @@
+# Ticket HMM-2. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-2
+title: InternalUtils - log-determinant, split by lengths, covariance checks
+repo: software-factory/hmmlearn-net
+base: main
+phase: J1
+type: feature
+level: standard
+objective: |
+  Port hmmlearn/_utils.py to C#: the static class HmmLearn.InternalUtils with LogDet, SplitXLengths, ValidateCovars and
+  DistributeCovarMatrixToMatchCovarianceType, used by the models and the KL divergences later.
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/_utils.py (84 lines) and the numbers of oracle/golden/internal_utils.json (structure in
+  oracle/README.md; do not open the JSON file whole, it is large). There is no Python test file for these helpers.
+scope:
+  writable:
+    - src/HmmLearn/InternalUtils.cs
+  read_only:
+    - src/HmmLearn/CovarianceType.cs
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/InternalUtils.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public static class InternalUtils
+  {
+      public static double LogDet(double[,] a);
+      public static List<double[,]> SplitXLengths(double[,] x, int[]? lengths);
+      public static void ValidateCovars(double[,,] covars, CovarianceType covarianceType, int nComponents);
+      public static double[,,] DistributeCovarMatrixToMatchCovarianceType(double[,] tiedCv, CovarianceType covarianceType, int nComponents);
+  }
+
+  Semantics (the XML comments of the stubs say the same):
+  - LogDet: log |det| through an LU decomposition with partial pivoting (hand-written, or MathNet.Numerics which the library already
+    references). Negative determinant gives NaN, determinant 0 gives -infinity, a non-square matrix throws ArgumentException.
+  - SplitXLengths: null lengths gives a list holding x itself; otherwise new matrices with the rows of each sequence, in order.
+    Negative lengths, or lengths that do not sum to the number of rows, throw ArgumentException.
+  - ValidateCovars: compact uniform shapes spherical (nc,1,1), diag (nc,1,nf), full (nc,nf,nf), tied (1,nf,nf) with nc = nComponents;
+    any other shape throws ArgumentException. Spherical and diag need every variance > 0. Tied and full need every matrix symmetric
+    (numpy.allclose: |a[i,j] - a[j,i]| <= 1e-8 + 1e-5 * |a[j,i]|) and positive definite (every eigenvalue > 0, for instance by a
+    symmetric eigenvalue decomposition of MathNet.Numerics). Anything that makes hmmlearn raise ValueError throws ArgumentException.
+  - DistributeCovarMatrixToMatchCovarianceType: spherical gives, for each of the nComponents states, the mean of ALL the entries of
+    the matrix (off-diagonal entries included, hmmlearn does exactly this); diag the diagonal of the matrix; full the matrix itself
+    for each state; tied the matrix once. Result shapes (nc,1,1), (nc,1,nf), (nc,nf,nf), (1,nf,nf).
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-2/, namespace HmmLearn.Tests.Acceptance.Hmm2, exactly
+  these files and classes (xunit 2, `using Xunit` is global):
+  - LogDetTests.cs                       -> class LogDetTests
+  - SplitXLengthsTests.cs                -> class SplitXLengthsTests
+  - ValidateCovarsTests.cs               -> class ValidateCovarsTests
+  - DistributeCovarMatrixTests.cs        -> class DistributeCovarMatrixTests
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("internal_utils") returns the JsonElement of oracle/golden/internal_utils.json.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsTensor3(), AsInts(), AsString(),
+    AsBool(), Has(name); a property is read with element.GetProperty("name"). A covariance type is the lowercase string of the
+    case: Enum.Parse<CovarianceType>(text, ignoreCase: true).
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12; NaN equals NaN; infinities must be equal).
+  Golden file oracle/golden/internal_utils.json: logdet_cases (name, matrix, expected), split_lengths_cases (name, X, lengths (a list or
+  null), expected (a list of matrices) or raises: true), validate_covars_cases (name, covariance_type, n_components, covars, raises),
+  distribute_covar_cases (name, covariance_type, n_components, tied_covar, expected).
+constraints:
+  - "Only MathNet.Numerics (already referenced) and the .NET base class library: no new package."
+  - "Static, pure methods and no global state; no exception other than those documented in the interface."
+  - "Only src/HmmLearn/InternalUtils.cs changes. No public member beyond the interface; every public member keeps an XML summary."
+  - "The tests are deterministic: the numbers come from oracle/golden/internal_utils.json through Golden.Load, compared with Close.Equal. Add a few hand-checked cases of your own (shapes, exceptions) but do not copy golden numbers by hand."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Hand-written expectations must be trivially checkable (0, 1, powers of two, symmetric cases) and recomputed twice; prefer structure (sums to 1, shapes, in place, exceptions, invariants) to hand-computed numbers. A wrong expectation in a locked test costs a whole round."
+  - "A locked test that seems wrong is reported ONLY in test_disputes (exact test name, your argument, the fix you propose); never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      InternalUtils.LogDet returns log |det| of a square matrix (NaN for a negative determinant, -infinity for a singular matrix) and
+      rejects a matrix that is not square. Every case of logdet_cases of oracle/golden/internal_utils.json is reproduced.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm2.LogDetTests'
+  - id: C2
+    text: |
+      InternalUtils.SplitXLengths splits by lengths (null lengths gives x itself) and rejects negative lengths or lengths that do not sum
+      to the number of rows. Every case of split_lengths_cases is reproduced.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm2.SplitXLengthsTests'
+  - id: C3
+    text: |
+      InternalUtils.ValidateCovars accepts valid compact covariances of the four types and throws ArgumentException exactly when
+      hmmlearn raises ValueError (non-positive variances, not symmetric, not positive definite) or the shape is wrong. Every case of
+      validate_covars_cases is reproduced.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm2.ValidateCovarsTests'
+  - id: C4
+    text: |
+      InternalUtils.DistributeCovarMatrixToMatchCovarianceType creates the compact covariances of the four types, in the uniform
+      shapes. Every case of distribute_covar_cases is reproduced.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm2.DistributeCovarMatrixTests'
+  - id: C5
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 3
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/_utils.py
+    - oracle/README.md
+    - src/HmmLearn/InternalUtils.cs
+    - src/HmmLearn/CovarianceType.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
