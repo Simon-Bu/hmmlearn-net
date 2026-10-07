@@ -1,0 +1,122 @@
+# Ticket HMM-5. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-5
+title: Hmmc xi sums and Viterbi
+repo: software-factory/hmmlearn-net
+base: main
+phase: J1
+type: feature
+level: critical
+objective: |
+  Port the xi sums and the Viterbi algorithm of ext/_hmmc.cpp to C#: HmmLearn.Hmmc.ComputeScalingXiSum, ComputeLogXiSum and Viterbi
+  (second file of the partial class Hmmc; the forward and backward passes and the log helpers LogSumExp and LogAddExp are already
+  merged in Hmmc.ForwardBackward.cs and can be called). The EM M-step and the decoders use them.
+  Reference: reference/hmmlearn-0.3.3/ext/_hmmc.cpp lines 207-322 (compute_scaling_xi_sum, compute_log_xi_sum, viterbi); the
+  Wikipedia example of reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_base.py (test_do_viterbi_pass); and the numbers of
+  oracle/golden/hmmc.json (structure in oracle/README.md; do not open the JSON file whole, it is large).
+scope:
+  writable:
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+  read_only:
+    - src/HmmLearn/Hmmc.ForwardBackward.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/Hmmc.ViterbiXi.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public static partial class Hmmc
+  {
+      public static double[,] ComputeScalingXiSum(double[,] fwdlattice, double[,] transmat, double[,] bwdlattice, double[,] frameprob);
+      public static double[,] ComputeLogXiSum(double[,] fwdlattice, double[,] transmat, double[,] bwdlattice, double[,] logFrameprob);
+      public static (double LogProb, int[] StateSequence) Viterbi(double[] startprob, double[,] transmat, double[,] logFrameprob);
+  }
+  // already merged, usable: internal static double LogAddExp(double a, double b); internal static double LogSumExp(ReadOnlySpan<double> v);
+
+  Semantics: the XML comments of the stubs are the specification; follow the C++ line by line, in particular
+  - the xi sums are (nc, nc) matrices, zeros (scaling) or -infinity (log) for a single sample; the log version subtracts the log
+    probability of the sequence (LogSumExp of the last row of fwdlattice) from every term;
+  - Viterbi tie-breaking, which the oracle checks: the final state is the FIRST index of the maximum of the last lattice row, but
+    when going backwards the state chosen at each time is the LARGEST index among equal maxima (the C++ compares (value, index) pairs
+    from a start of (-infinity, 0): even a candidate list that is entirely -infinity yields the largest index). A model where every
+    path is equally likely therefore gives states [nc-1, ..., nc-1, 0];
+  - shapes that do not agree throw ArgumentException("shape mismatch").
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-5/, namespace HmmLearn.Tests.Acceptance.Hmm5, exactly
+  these files and classes (xunit 2, `using Xunit` is global):
+  - ScalingXiSumTests.cs        -> class ScalingXiSumTests
+  - LogXiSumTests.cs            -> class LogXiSumTests
+  - ViterbiTests.cs             -> class ViterbiTests             (oracle cases whose name does not start with "viterbi-")
+  - ViterbiTieBreakingTests.cs  -> class ViterbiTieBreakingTests  (oracle cases whose name starts with "viterbi-")
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("hmmc") returns the JsonElement of oracle/golden/hmmc.json.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsInts(), AsString(), AsBool(),
+    Has(name); a property is read with element.GetProperty("name").
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12; NaN equals NaN; infinities must be equal). States are compared with Assert.Equal on int[].
+  Golden file oracle/golden/hmmc.json: cases, each with name, startprob, transmat, frameprob, log_frameprob and the expected outputs
+  of every function. For this ticket: scaling_xi_sum (a matrix; call ComputeScalingXiSum with forward_scaling.fwdlattice,
+  backward_scaling.bwdlattice, transmat and frameprob of the same case; absent when forward_scaling is {raises: true}), log_xi_sum
+  (call ComputeLogXiSum with forward_log.fwdlattice, backward_log.bwdlattice, transmat and log_frameprob; absent when the log
+  probability is -infinity) and viterbi {log_prob, states} (call Viterbi with startprob, transmat and log_frameprob). Use the oracle's
+  own lattices as inputs, never the results of another function. Include a hand-written case for shape errors.
+constraints:
+  - "Only the .NET base class library: no new package."
+  - "Static, pure methods and no global state; allocate only the results, never inside the time loop."
+  - "Only src/HmmLearn/Hmmc.ViterbiXi.cs changes (it may call the members of Hmmc.ForwardBackward.cs). Keep the public signatures above; every public member keeps an XML summary."
+  - "The tests are deterministic: the numbers come from oracle/golden/hmmc.json through Golden.Load, compared with Close.Equal. Do not copy golden numbers by hand; hand-written cases are only for shape errors."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes (exact test name, your argument, the fix you propose); never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      Hmmc.ComputeScalingXiSum reproduces scaling_xi_sum of every case of oracle/golden/hmmc.json that has one (including the single
+      sample case, which gives zeros) and throws ArgumentException for inconsistent shapes.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm5.ScalingXiSumTests'
+  - id: C2
+    text: |
+      Hmmc.ComputeLogXiSum reproduces log_xi_sum of every case that has one (including entries equal to -infinity and the single
+      sample case) and throws ArgumentException for inconsistent shapes.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm5.LogXiSumTests'
+  - id: C3
+    text: |
+      Hmmc.Viterbi reproduces log_prob and states of the cases of oracle/golden/hmmc.json whose name does not start with "viterbi-"
+      (including the Wikipedia example [0, 0, 1, 0, 0] with log probability -4.4590 and the impossible observation), and throws
+      ArgumentException for inconsistent shapes.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm5.ViterbiTests'
+  - id: C4
+    text: |
+      Hmmc.Viterbi breaks ties like the C++: final state = first maximum, earlier states = largest index among equal maxima. The cases
+      "viterbi-ties" and "viterbi-partial-ties" of oracle/golden/hmmc.json are reproduced.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm5.ViterbiTieBreakingTests'
+  - id: C5
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/ext/_hmmc.cpp
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_base.py
+    - oracle/README.md
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+    - src/HmmLearn/Hmmc.ForwardBackward.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
