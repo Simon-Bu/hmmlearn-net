@@ -1,3 +1,6 @@
+using MathNet.Numerics;
+using MathNet.Numerics.Distributions;
+
 namespace HmmLearn;
 
 /// <summary>
@@ -14,10 +17,13 @@ public abstract class VariationalBaseHmm : AbstractHmm
     /// Creates the model. <paramref name="startProbPrior"/> and <paramref name="transMatPrior"/> are the values of every parameter of
     /// the symmetric Dirichlet priors of the start probabilities and of each transition row; null means 1 / NComponents.
     /// </summary>
-    protected VariationalBaseHmm(int nComponents, double? startProbPrior, double? transMatPrior, DecoderAlgorithm algorithm, int? randomState,
-        int nIter, double tol, bool verbose, string @params, string initParams, Implementation implementation)
+    protected VariationalBaseHmm(int nComponents, double? startProbPrior, double? transMatPrior, DecoderAlgorithm algorithm,
+        int? randomState, int nIter, double tol, bool verbose, string @params, string initParams, Implementation implementation)
         : base(nComponents, algorithm, randomState, nIter, tol, verbose, @params, initParams, implementation)
-        => throw new NotImplementedException();
+    {
+        StartProbPrior = startProbPrior;
+        TransMatPrior = transMatPrior;
+    }
 
     /// <summary>Value of every parameter of the Dirichlet prior of the start probabilities used by <see cref="Init"/>; null means 1 / NComponents.</summary>
     public double? StartProbPrior { get; set; }
@@ -61,7 +67,66 @@ public abstract class VariationalBaseHmm : AbstractHmm
     /// call), else from <see cref="Random.Shared"/>. Then the same degenerate-fit warning as BaseHmm when
     /// <see cref="AbstractHmm.GetNFitScalarsPerParam"/> is not null and x has fewer values than the free scalars of the letters of Params.
     /// </summary>
-    protected override void Init(double[,] x, int[] lengths) => throw new NotImplementedException();
+    protected override void Init(double[,] x, int[] lengths)
+    {
+        CheckAndSetNFeatures(x);
+        var nc = NComponents;
+        var uniformPrior = 1.0 / nc;
+        var random = RandomState.HasValue ? new Random(RandomState.Value) : Random.Shared;
+        if (NeedsInit('s', "startprob_posterior_", StartProbPosterior != null)
+            || NeedsInit('s', "startprob_prior_", StartProbPriorValues != null))
+        {
+            var startProbInit = StartProbPrior ?? uniformPrior;
+            var startProbPriorValues = new double[nc];
+            Array.Fill(startProbPriorValues, startProbInit);
+            StartProbPriorValues = startProbPriorValues;
+
+            var alpha = new double[nc];
+            Array.Fill(alpha, uniformPrior);
+            var scale = lengths.Length;
+            var draw = Dirichlet.Sample(random, alpha);
+            var startProbPosterior = new double[nc];
+            for (var i = 0; i < nc; i++)
+                startProbPosterior[i] = draw[i] * scale;
+            StartProbPosterior = startProbPosterior;
+        }
+        if (NeedsInit('t', "transmat_posterior_", TransMatPosterior != null)
+            || NeedsInit('t', "transmat_prior_", TransMatPriorValues != null))
+        {
+            var transMatInit = TransMatPrior ?? uniformPrior;
+            var transMatPriorValues = new double[nc, nc];
+            for (var i = 0; i < nc; i++)
+                for (var j = 0; j < nc; j++)
+                    transMatPriorValues[i, j] = transMatInit;
+            TransMatPriorValues = transMatPriorValues;
+
+            var alpha = new double[nc];
+            Array.Fill(alpha, uniformPrior);
+            var totalLength = 0;
+            for (var i = 0; i < lengths.Length; i++)
+                totalLength += lengths[i];
+            var scale = (double)totalLength / nc;
+            var transMatPosterior = new double[nc, nc];
+            for (var i = 0; i < nc; i++)
+            {
+                var draw = Dirichlet.Sample(random, alpha);
+                for (var j = 0; j < nc; j++)
+                    transMatPosterior[i, j] = draw[j] * scale;
+            }
+            TransMatPosterior = transMatPosterior;
+        }
+
+        var nFitScalarsPerParam = GetNFitScalarsPerParam();
+        if (nFitScalarsPerParam != null)
+        {
+            var nFitScalars = 0;
+            foreach (var letter in Params)
+                nFitScalars += nFitScalarsPerParam.GetValueOrDefault(letter);
+            var size = x.GetLength(0) * x.GetLength(1);
+            if (size < nFitScalars)
+                RaiseWarning($"Fitting a model with {nFitScalars} free scalar parameters with only {size} data points will result in a degenerate solution.");
+        }
+    }
 
     /// <summary>
     /// Validates the priors and posteriors; throws <see cref="ArgumentException"/> if <see cref="StartProbPriorValues"/> or
@@ -70,22 +135,67 @@ public abstract class VariationalBaseHmm : AbstractHmm
     /// <see cref="TransMatPosterior"/> is null or not (NComponents x NComponents) ("transmat_prior_ must have shape (n_components,
     /// n_components)", "transmat_posterior_ must have shape (n_components, n_components)"). The values are not otherwise checked.
     /// </summary>
-    protected override void Check() => throw new NotImplementedException();
+    protected override void Check()
+    {
+        var nc = NComponents;
+        if (StartProbPriorValues == null || StartProbPriorValues.Length != nc)
+            throw new ArgumentException("startprob_prior_ must have length n_components");
+        if (StartProbPosterior == null || StartProbPosterior.Length != nc)
+            throw new ArgumentException("startprob_posterior_ must have length n_components");
+        if (TransMatPriorValues == null || TransMatPriorValues.GetLength(0) != nc || TransMatPriorValues.GetLength(1) != nc)
+            throw new ArgumentException("transmat_prior_ must have shape (n_components, n_components)");
+        if (TransMatPosterior == null || TransMatPosterior.GetLength(0) != nc || TransMatPosterior.GetLength(1) != nc)
+            throw new ArgumentException("transmat_posterior_ must have shape (n_components, n_components)");
+    }
 
     /// <summary>Start of every E-step: refreshes <see cref="StartProbSubnorm"/> and <see cref="TransMatSubnorm"/> from the posteriors with the digamma function.</summary>
-    protected override void EstepBegin() => throw new NotImplementedException();
+    protected override void EstepBegin()
+    {
+        var posterior = StartProbPosterior!;
+        var sum = 0.0;
+        for (var i = 0; i < posterior.Length; i++)
+            sum += posterior[i];
+        var digammaSum = SpecialFunctions.DiGamma(sum);
+        StartProbSubnorm = new double[posterior.Length];
+        for (var i = 0; i < posterior.Length; i++)
+            StartProbSubnorm[i] = Math.Exp(SpecialFunctions.DiGamma(posterior[i]) - digammaSum);
+
+        var transPosterior = TransMatPosterior!;
+        var rows = transPosterior.GetLength(0);
+        var cols = transPosterior.GetLength(1);
+        TransMatSubnorm = new double[rows, cols];
+        for (var i = 0; i < rows; i++)
+        {
+            var rowSum = 0.0;
+            for (var j = 0; j < cols; j++)
+                rowSum += transPosterior[i, j];
+            var digammaRowSum = SpecialFunctions.DiGamma(rowSum);
+            for (var j = 0; j < cols; j++)
+                TransMatSubnorm[i, j] = Math.Exp(SpecialFunctions.DiGamma(transPosterior[i, j]) - digammaRowSum);
+        }
+    }
 
     /// <summary><see cref="StartProbSubnorm"/>: the E-step passes use the subnormalized start probabilities.</summary>
-    protected override double[] FitStartProb => throw new NotImplementedException();
+    protected override double[] FitStartProb => StartProbSubnorm!;
 
     /// <summary><see cref="TransMatSubnorm"/>: the E-step passes and the xi sums use the subnormalized transition matrix.</summary>
-    protected override double[,] FitTransMat => throw new NotImplementedException();
+    protected override double[,] FitTransMat => TransMatSubnorm!;
 
     /// <summary><see cref="ComputeSubnormLogLikelihood"/>: the E-step log passes use the subnormalized emission likelihoods.</summary>
-    protected override double[,] ComputeFitLogLikelihood(double[,] x) => throw new NotImplementedException();
+    protected override double[,] ComputeFitLogLikelihood(double[,] x) => ComputeSubnormLogLikelihood(x);
 
     /// <summary>The exponential of <see cref="ComputeSubnormLogLikelihood"/>: the E-step scaling passes use the subnormalized emission likelihoods.</summary>
-    protected override double[,] ComputeFitLikelihood(double[,] x) => throw new NotImplementedException();
+    protected override double[,] ComputeFitLikelihood(double[,] x)
+    {
+        var logLikelihood = ComputeSubnormLogLikelihood(x);
+        var rows = logLikelihood.GetLength(0);
+        var cols = logLikelihood.GetLength(1);
+        var likelihood = new double[rows, cols];
+        for (var i = 0; i < rows; i++)
+            for (var j = 0; j < cols; j++)
+                likelihood[i, j] = Math.Exp(logLikelihood[i, j]);
+        return likelihood;
+    }
 
     /// <summary>
     /// M-step of the start probabilities and transition matrix. If Params contains 's': <see cref="StartProbPosterior"/> = prior values +
@@ -93,12 +203,71 @@ public abstract class VariationalBaseHmm : AbstractHmm
     /// <see cref="TransMatPosterior"/> = prior values + stats.Trans and <see cref="AbstractHmm.TransMat"/> = each row of the posterior
     /// divided by its sum. New arrays replace the old ones.
     /// </summary>
-    protected override void DoMStep(SufficientStatistics stats) => throw new NotImplementedException();
+    protected override void DoMStep(SufficientStatistics stats)
+    {
+        if (Params.Contains('s'))
+        {
+            var prior = StartProbPriorValues!;
+            var posterior = new double[prior.Length];
+            for (var i = 0; i < prior.Length; i++)
+                posterior[i] = prior[i] + stats.Start[i];
+            StartProbPosterior = posterior;
+
+            var sum = 0.0;
+            for (var i = 0; i < posterior.Length; i++)
+                sum += posterior[i];
+            var startProb = new double[prior.Length];
+            for (var i = 0; i < prior.Length; i++)
+                startProb[i] = posterior[i] / sum;
+            StartProb = startProb;
+        }
+        if (Params.Contains('t'))
+        {
+            var prior = TransMatPriorValues!;
+            var rows = prior.GetLength(0);
+            var cols = prior.GetLength(1);
+            var posterior = new double[rows, cols];
+            for (var i = 0; i < rows; i++)
+                for (var j = 0; j < cols; j++)
+                    posterior[i, j] = prior[i, j] + stats.Trans[i, j];
+            TransMatPosterior = posterior;
+
+            var transMat = new double[rows, cols];
+            for (var i = 0; i < rows; i++)
+            {
+                var rowSum = 0.0;
+                for (var j = 0; j < cols; j++)
+                    rowSum += posterior[i, j];
+                for (var j = 0; j < cols; j++)
+                    transMat[i, j] = posterior[i, j] / rowSum;
+            }
+            TransMat = transMat;
+        }
+    }
 
     /// <summary>
     /// The variational lower bound contribution of the start probabilities, the transitions and the data: the log probability of the data
     /// computed with the subnormalized parameters, minus <see cref="KlDivergence.KlDirichlet"/> of the start posterior from its prior, minus the
     /// sum over the states of the same divergence for each transition row.
     /// </summary>
-    protected override double ComputeLowerBound(double currLogProb) => throw new NotImplementedException();
+    protected override double ComputeLowerBound(double currLogProb)
+    {
+        var bound = currLogProb - KlDivergence.KlDirichlet(StartProbPosterior!, StartProbPriorValues!);
+        var transPosterior = TransMatPosterior!;
+        var transPrior = TransMatPriorValues!;
+        var rows = transPosterior.GetLength(0);
+        var cols = transPosterior.GetLength(1);
+        var posteriorRow = new double[cols];
+        var priorRow = new double[cols];
+        for (var i = 0; i < rows; i++)
+        {
+            for (var j = 0; j < cols; j++)
+            {
+                posteriorRow[j] = transPosterior[i, j];
+                priorRow[j] = transPrior[i, j];
+            }
+            bound -= KlDivergence.KlDirichlet(posteriorRow, priorRow);
+        }
+        return bound;
+    }
 }
