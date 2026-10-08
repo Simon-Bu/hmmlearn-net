@@ -153,8 +153,7 @@ public partial class GmmHmm : BaseHmm
     }
 
     /// <summary>
-    /// Checks the start probabilities and transition matrix (base) and the emission parameters, when the model is fully set up
-    /// (<see cref="AbstractHmm.StartProb"/> and <see cref="AbstractHmm.TransMat"/> are both set, as after <c>Init</c>):
+    /// Checks the start probabilities and transition matrix (base) and the emission parameters:
     /// <list type="bullet">
     /// <item><see cref="NFeatures"/> is taken from <see cref="Means"/> if unknown; a mismatch with the shape of <see cref="Means"/> throws.</item>
     /// <item><see cref="Weights"/> (shape (n_components, n_mix)), <see cref="Means"/> (shape (n_components, n_mix, n_features)) and
@@ -166,19 +165,14 @@ public partial class GmmHmm : BaseHmm
     /// <item>Each tied or full matrix must be symmetric (numpy allclose) with a smallest eigenvalue not negative: a negative one
     /// throws, a null one raises a warning.</item>
     /// </list>
-    /// When the model is not fully set up (startprob or transmat missing), the base check is skipped and <see cref="Weights"/> is
-    /// required only if present; <see cref="Means"/> and <see cref="Covars"/> are still validated. A missing required parameter
-    /// throws <see cref="ArgumentException"/>.
+    /// A missing required parameter throws <see cref="ArgumentException"/>.
     /// </summary>
     protected override void Check()
     {
-        // The base check validates startprob and transmat; the full emission check (including required weights) applies once the
-        // model is fully set up. A partially set model (emissions only) validates whatever is present.
-        var fullySet = StartProb != null && TransMat != null;
-        if (fullySet)
-            base.Check();
+        base.Check();
         var means = Means ?? throw new ArgumentException("means_ must be set");
         var covars = Covars ?? throw new ArgumentException("covars_ must be set");
+        var weights = Weights ?? throw new ArgumentException("weights_ must be set");
 
         NFeatures ??= means.GetLength(2);
         var nc = NComponents;
@@ -189,16 +183,10 @@ public partial class GmmHmm : BaseHmm
             throw new ArgumentException(
                 $"means_ must have shape ({nc}, {nm}, {nf}), actual shape: ({means.GetLength(0)}, {means.GetLength(1)}, {means.GetLength(2)})");
 
-        var weights = Weights;
-        if (weights == null && fullySet)
-            throw new ArgumentException("weights_ must be set");
-        if (weights != null)
-        {
-            if (weights.GetLength(0) != nc || weights.GetLength(1) != nm)
-                throw new ArgumentException(
-                    $"weights_ must have shape ({nc}, {nm}), actual shape: ({weights.GetLength(0)}, {weights.GetLength(1)})");
-            CheckSum1("weights_", weights);
-        }
+        if (weights.GetLength(0) != nc || weights.GetLength(1) != nm)
+            throw new ArgumentException(
+                $"weights_ must have shape ({nc}, {nm}), actual shape: ({weights.GetLength(0)}, {weights.GetLength(1)})");
+        CheckSum1("weights_", weights);
 
         var (d1, d2, d3) = ExpectedCovarsShape(nm, nf);
         if (covars.GetLength(0) != nc || covars.GetLength(1) != d1 || covars.GetLength(2) != d2 || covars.GetLength(3) != d3)
