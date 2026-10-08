@@ -11,9 +11,9 @@ namespace HmmLearn;
 public class MultinomialHmm : BaseHmm
 {
     /// <summary>
-    /// Creates the model. <paramref name="nTrials"/>: if it has a value, the total count of every sample must equal it and sampling uses it;
+    /// Creates the model. <paramref name="nTrials"/>: if it has a value, Fit requires every sample to total it and sampling uses it;
     /// if null, the totals are free: each sample's own total is its number of trials (sampling then needs NTrials to be set).
-    /// See <see cref="NTrials"/>. The defaults are those of hmmlearn.
+    /// Inference (Score, ScoreSamples, Decode) always uses each row's own total. See <see cref="NTrials"/>. The defaults are those of hmmlearn.
     /// </summary>
     public MultinomialHmm(int nComponents = 1, int? nTrials = null, double startProbPrior = 1.0, double transMatPrior = 1.0,
         DecoderAlgorithm algorithm = DecoderAlgorithm.Viterbi, int? randomState = null, int nIter = 10, double tol = 1e-2,
@@ -24,7 +24,8 @@ public class MultinomialHmm : BaseHmm
     }
 
     /// <summary>
-    /// Number of trials of every sample. With a value, every sample must total it (else <see cref="ArgumentException"/>) and Sample uses it.
+    /// Number of trials of every sample. With a value, Fit requires every sample to total it (else <see cref="ArgumentException"/>) and
+    /// Sample uses it; inference (Score, ScoreSamples, Decode) does not check the totals and uses each row's own total, as hmmlearn does.
     /// Null means the totals are free: each sample's own total is its number of trials. That is valid for inference, for a fit and for a
     /// model set by hand; only Sample needs a value (<see cref="InvalidOperationException"/> without it).
     /// </summary>
