@@ -1,0 +1,152 @@
+# Ticket HMM-17. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-17
+title: GmmHmm learning - initialization with k-means and M-step with priors
+repo: software-factory/hmmlearn-net
+base: main
+phase: J3
+type: feature
+level: standard
+objective: |
+  Port the learning half of GMMHMM of hmmlearn/hmm.py to C#: Init (k-means for the states, then for the mixture components of each
+  state; the data covariance for the covariances) and DoMStep (mixture weights, means and covariances with priors, for the four
+  covariance types) in src/HmmLearn/GmmHmm.Learning.cs, the second file of the partial class GmmHmm. With it GmmHmm fits end to end.
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py lines 533-591 (_init), 593-648 (_init_covar_priors, _fix_priors_shape: the
+  defaults are in GmmHmm.EffectiveCovarsPrior and EffectiveCovarsWeight) and 734-809 (_do_mstep); its tests
+  reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_gmm_hmm.py, test_gmm_hmm_multisequence.py and test_gmm_hmm_new.py; and the numbers
+  of oracle/golden/gmm_spherical.json, gmm_diag.json, gmm_tied.json and gmm_full.json (fit_cases; structure in oracle/README.md; do not
+  open the JSON files whole, they are large). The first half (parameters, checks, likelihood, sampling, statistics) is already merged.
+scope:
+  writable:
+    - src/HmmLearn/GmmHmm.Learning.cs
+  read_only:
+    - src/HmmLearn/GmmHmm.cs
+    - src/HmmLearn/GaussianEmission.cs
+    - src/HmmLearn/GaussianHmm.cs
+    - src/HmmLearn/GaussianHmm.Learning.cs
+    - src/HmmLearn/BaseHmm.cs
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/AbstractHmm.Fit.cs
+    - src/HmmLearn/SufficientStatistics.cs
+    - src/HmmLearn/CovarianceType.cs
+    - src/HmmLearn/DecoderAlgorithm.cs
+    - src/HmmLearn/Implementation.cs
+    - src/HmmLearn/ConvergenceMonitor.cs
+    - src/HmmLearn/Hmmc.ForwardBackward.cs
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/InternalUtils.cs
+    - src/HmmLearn/Stats.cs
+    - src/HmmLearn/KMeans.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/GmmHmm.Learning.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public partial class GmmHmm
+  {
+      protected override void Init(double[,] x, int[] lengths);
+      protected override void DoMStep(SufficientStatistics stats);          // stats is a GmmStatistics
+  }
+  Already merged and usable (GmmHmm.cs, read-only): Weights (nc, nm), Means (nc, nm, nf), Covars (compact rank 4: spherical
+  (nc,nm,1,1), diag (nc,nm,1,nf), full (nc,nm,nf,nf), tied (nc,1,nf,nf)), NMix, CovarianceType, MinCovar, WeightsPrior, MeansPrior,
+  MeansWeight, EffectiveCovarsPrior, EffectiveCovarsWeight, GmmStatistics (PostMixSum, PostSum, MN, CN), the checks, the likelihood, the
+  sampling; from BaseHmm: base.Init, base.DoMStep (start probabilities and transition matrix, with priors), Aic, Bic; from AbstractHmm:
+  NeedsInit, Params, InitParams, RandomState, NFeatures; KMeans.Fit(x, k) -> (Centers, Labels); GaussianEmission.GenerateSample
+  (internal); Utils; InternalUtils.
+
+  Semantics: the XML comments of the stubs are the specification, followed from hmm.py. In particular
+  - Init: base.Init first; then the data covariance cv (sample covariance of the columns, divide by n - 1, plus MinCovar on the diagonal),
+    the main k-means with NComponents clusters, and for each cluster a second k-means with NMix clusters when the cluster has at least
+    NMix samples, else NMix draws from a Gaussian around the mean of the main centers with covariance cv (Random seeded like the base,
+    deterministic given RandomState); Weights, Means and Covars are set only for the letters NeedsInit asks for ('w', 'm', 'c'); the
+    spherical initial covariance is the mean of ALL entries of cv, the same for every state and mixture component;
+  - DoMStep: base.DoMStep(stats) first, then 'w', 'm', 'c' in this order (the covariances use the means just updated). The formulas are in
+    the XML comment; the quirks that the oracle checks and that must be copied: the prior of full and tied covariances is a scalar added
+    to EVERY entry of the matrix, off-diagonal ones too; the denominators are the ones of the comment (for the default priors the
+    update reduces to the maximum likelihood estimate); a mixture component with weight 0 and an all-zero numerator gets mean 0
+    (the denominator is forced to 1) so that no NaN spreads to tied covariances.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-17/, namespace HmmLearn.Tests.Acceptance.Hmm17, exactly
+  these files and classes (xunit 2 style attributes, `using Xunit` is global):
+  - FitParityTests.cs  -> class FitParityTests  (the fit_cases of the four oracle files, both implementations)
+  - InitTests.cs       -> class InitTests       (k-means based initialization, InitParams, reproducibility, small clusters)
+  - LearningTests.cs   -> class LearningTests   (statistical recovery of parameters, likelihood never decreasing, Aic and Bic)
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("gmm_spherical") (and gmm_diag, gmm_tied, gmm_full) return the JsonElement of the files.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsTensor3(), AsTensor4(), AsInts(),
+    AsString(), AsBool(), Has(name); a property is read with element.GetProperty("name").
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12).
+  Golden files: fit_cases {name, constructor {n_components, n_mix, covariance_type, n_iter, tol, params and optionally startprob_prior,
+  transmat_prior, weights_prior, means_prior, means_weight, covars_prior, covars_weight}, init {startprob, transmat, weights, means,
+  covars (compact rank 4)}, X, lengths, expected {startprob, transmat, weights, means, covars (compact rank 4), history, n_iter_done,
+  converged, score, aic, bic}}: build the model from the constructor keys (snake_case keys map to the C# names: n_mix is NMix, params is
+  Params, weights_prior is WeightsPrior, covars_prior is CovarsPrior...), InitParams = "", set StartProb, TransMat, Weights, Means and
+  Covars from init (copies), Fit with X and lengths, then compare the fitted parameters, Monitor.History, Monitor.Iter,
+  Monitor.Converged, Score, Aic and Bic. Run every case with Implementation.Log and Implementation.Scaling. Init and learning tests are
+  statistical: data sampled with a fixed seed from a model whose components are far apart, random initialization (InitParams
+  "stmcw") must start from valid parameters, be reproducible for a RandomState, never decrease the log likelihood between
+  single-iteration Fits (NIter = 1, InitParams = "" after the first Fit).
+constraints:
+  - "Only MathNet.Numerics (already referenced), the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/GmmHmm.Learning.cs changes. Keep every signature above; every protected member keeps an XML summary. No abstract member may be added."
+  - "Do not mutate the arrays a caller passes in; Weights, Means and Covars are replaced by new arrays."
+  - "The tests are deterministic: the numbers come from the oracle through Golden.Load, compared with Close.Equal; statistical tests use fixed seeds and wide tolerances. Do not copy golden numbers by hand."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field (id, verify, description, recommended, test_disputes...) makes the validator refuse the report and costs a whole attempt."
+  - "Keep your reasoning short: one reply that runs out of tokens (max-tokens) loses the whole attempt (HMM-6: 25 minutes of reasoning about the last digit of a formatted number, then nothing written). If a locked test still fails after two fixes and you cannot explain it, stop and write .factory/out/coder.json with status blocked and a question that gives the test, the expected and the actual value: the pilot answers. Never re-derive floating-point or library behaviour from bits: run a one-line experiment with the other API instead (F8 against a custom format string, Math.Round...). Custom numeric format strings round a 15-digit expansion, F8 and G17 are exact."
+  - "Compact covariance arrays have rank 4 and NO mixture axis for tied: tied is (nc, 1, nf, nf), so a loop over the mixture components that reads Covars[c, m, ...] must use index 0 for the tied type (HMM-16: a locked sampling test indexed a tied array with m = 1 and threw IndexOutOfRangeException whatever the implementation). Take each shape from the table in the interface, never from the full type."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes: each item has exactly two fields, test (the exact test name) and argument (your argument, with the fix you propose written inside it); any other field, such as fix, makes the validator refuse the whole report and costs an attempt (HMM-16). Never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      Fit with explicit initial parameters reproduces the start probabilities, transition matrix, weights, means, covariances (compact
+      rank 4), history, iteration count, convergence flag, score, aic and bic of every fit case of the four oracle files with both
+      implementations (defaults, tight tolerance, parameter subsets w, m, c, explicit priors including the scalar covariance prior).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm17.FitParityTests'
+  - id: C2
+    text: |
+      Init sets Weights to 1 / NMix, Means from the two-level k-means, and Covars from the data covariance in the shape of the covariance
+      type, only for the letters of InitParams that need it; it is reproducible for a RandomState, handles a cluster with fewer samples
+      than NMix, and leaves explicit parameters alone when InitParams does not name them.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm17.InitTests'
+  - id: C3
+    text: |
+      On data sampled from a mixture model with well separated components, fitting from the random initialization yields valid parameters
+      (weights rows sum to 1, covariances accepted by Check), never decreases the log likelihood from one single-iteration Fit to the
+      next, and Aic and Bic equal -2 * Score + 2 * k and -2 * Score + k * ln(rows) with k the documented number of free parameters.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm17.LearningTests'
+  - id: C4
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_gmm_hmm_new.py
+    - oracle/README.md
+    - src/HmmLearn/GmmHmm.Learning.cs
+    - src/HmmLearn/GmmHmm.cs
+    - src/HmmLearn/KMeans.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
