@@ -11,7 +11,7 @@ public static partial class Hmmc
     /// <summary>
     /// Sum over the sequence of the posterior probability of each transition, from scaled lattices:
     /// xi_sum[i,j] = sum over t = 0..n_samples-2 of fwdlattice[t,i] * transmat[i,j] * frameprob[t+1,j] * bwdlattice[t+1,j].
-    /// Result shape (nc, nc), zeros for a single sample. fwdlattice and bwdlattice must be (n_samples, nc), transmat (nc, nc),
+    /// Result shape (nc, nc), zeros for a single sample and also for 0 samples (fwdlattice, bwdlattice and frameprob are then (0, nc), transmat is still (nc, nc)). fwdlattice and bwdlattice must be (n_samples, nc), transmat (nc, nc),
     /// frameprob (n_samples, nc); otherwise <see cref="ArgumentException"/> "shape mismatch".
     /// </summary>
     public static double[,] ComputeScalingXiSum(double[,] fwdlattice, double[,] transmat, double[,] bwdlattice, double[,] frameprob)
@@ -35,7 +35,7 @@ public static partial class Hmmc
     /// Same sum in log space, from log lattices: logProb = LogSumExp of the last row of fwdlattice; then
     /// log_xi_sum[i,j] = LogAddExp over t = 0..n_samples-2 of
     /// (fwdlattice[t,i] + log(transmat[i,j]) + logFrameprob[t+1,j] + bwdlattice[t+1,j] - logProb), starting from -infinity
-    /// (so a single sample gives a matrix of -infinity). With 0 samples (all inputs (0, nc)) the sum is empty too: the result is a
+    /// (so a single sample gives a matrix of -infinity). With 0 samples (fwdlattice, bwdlattice and logFrameprob are (0, nc), transmat is (nc, nc)) the sum is empty too: the result is a
     /// new (nc, nc) matrix of -infinity and the last row of fwdlattice is not read. Result shape (nc, nc). Shape errors as in <see cref="ComputeScalingXiSum"/>.
     /// </summary>
     public static double[,] ComputeLogXiSum(double[,] fwdlattice, double[,] transmat, double[,] bwdlattice, double[,] logFrameprob)
