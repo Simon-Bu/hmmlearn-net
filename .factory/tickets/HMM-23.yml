@@ -14,9 +14,11 @@ objective: |
      reference/hmmlearn-0.3.3/src/hmmlearn/_utils.py) raises ValueError there, so the port must throw the documented ArgumentException.
   2. ValidateCovars throws IndexOutOfRangeException for a covariance without features: tied shape (1, 0, 0) or full shape (nc, 0, 0). The
      reference (_validate_covars, same file) accepts them: a 0 x 0 matrix is symmetric and has no eigenvalue to reject.
+  The coder writes the tests of this ticket and then the fix (no separate tests agent).
 scope:
   writable:
     - src/HmmLearn/InternalUtils.cs
+    - tests/acceptance/HMM-23/**
   read_only:
     - src/HmmLearn/HmmLearn.csproj
     - reference/**
@@ -40,14 +42,13 @@ interface: |
     and a tied tensor (2, 0, 0), still throw ArgumentException.
   - The XML summaries of both methods state these rules.
 
-  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-23/, namespace HmmLearn.Tests.Acceptance.Hmm23, exactly these
-  files and classes (xunit 2 style attributes, `using Xunit` is global):
+  Tests (written by the coder FIRST, in tests/acceptance/HMM-23/, namespace HmmLearn.Tests.Acceptance.Hmm23), exactly these files and
+  classes (xunit 2 style attributes, `using Xunit` is global):
   - SplitXLengthsOverflowTests.cs  -> class SplitXLengthsOverflowTests
   - ZeroFeatureCovarsTests.cs      -> class ZeroFeatureCovarsTests
-
-  This is a bug ticket: the code exists. Read src/HmmLearn/InternalUtils.cs and the tests of HMM-2 first (tests/acceptance/HMM-2/, read-only).
-  Hand-written cases are enough, no golden file is needed. Each class must contain tests that FAIL on the current code (the two defects) and
-  may add control tests that already pass (documented behavior that must not change).
+  Read src/HmmLearn/InternalUtils.cs and the tests of HMM-2 first (tests/acceptance/HMM-2/, read-only). Hand-written cases are enough, no
+  golden file is needed. Each class must contain tests that FAIL on the unfixed code (the two defects) and may add control tests that
+  already pass (documented behavior that must not change).
   Overflow cases: use matrices with ZERO columns (new double[0, 0], new double[2, 0]) so that no test allocates memory.
   - lengths { 1073741824, 1073741824, 1073741824, 1073741824 } (true sum 2^32, wraps to 0) with x of 0 rows -> ArgumentException;
   - lengths { int.MaxValue, int.MaxValue, 4 } (true sum 2^32 + 2, wraps to 2) with x of 2 rows -> ArgumentException;
@@ -55,16 +56,14 @@ interface: |
   Zero-feature cases: ValidateCovars does not throw for full new double[3, 0, 0] with nComponents 3 and for tied new double[1, 0, 0]; it
   still throws ArgumentException (exact type) for full new double[2, 0, 0] with nComponents 3 and for tied new double[2, 0, 0].
 constraints:
+  - "Order of work: write the two test classes, run both verify commands on the UNFIXED code and check that they fail for the right reason (an assertion failure or the defect's exception, never a compile error or 'no test matches'); say in the summary of .factory/out/coder.json which tests failed before the fix; only then change src/HmmLearn/InternalUtils.cs."
   - "Only the .NET base class library, MathNet.Numerics (already referenced) and the merged HmmLearn code: no new package."
-  - "Only src/HmmLearn/InternalUtils.cs changes. Keep the public signatures above; every public member keeps an XML summary."
+  - "Only src/HmmLearn/InternalUtils.cs and the folder tests/acceptance/HMM-23/ change. Keep the public signatures above; every public member keeps an XML summary."
   - "Behavior for valid inputs does not change: the acceptance tests of HMM-2 and of every other merged ticket must stay green."
   - "The tests are deterministic and hand-written; at most three exact numeric assertions. Never assert exact equality to 0 or to -infinity for a result that rounding could change."
-  - "Each test class compiles against the current code and FAILS on it with an assertion failure or an unexpected exception (never a compile error, never 'no test matches'): run each verify command before you finish."
   - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
   - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
-  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field makes the validator refuse the report and costs a whole attempt."
   - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
-  - "A locked test that seems wrong is reported ONLY in test_disputes: each item has exactly two fields, test (the exact test name) and argument (your argument, with the fix you propose written inside it); any other field makes the validator refuse the whole report and costs an attempt. Never invent remark ids in replies, which answers the review remarks only (none in round 1)."
   - "Work inside this worktree only: do not read the factory or anything outside the repository."
 criteria:
   - id: C1
@@ -79,11 +78,14 @@ criteria:
       not match nComponents with ArgumentException.
     verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm23.ZeroFeatureCovarsTests'
   - id: C3
+    text: |
+      The new tests are meaningful: each class has at least one test that fails on the unfixed code and passes on the fix (the reviewer
+      checks this against the diff and the coder's summary), and no new test re-implements the code under test.
+  - id: C4
     text: "The XML summaries of the two methods state the new rules; the code stays readable: short methods, no dead code."
 verifications:
   - dotnet run --project tests/HmmLearn.Tests
 roles:
-  tests: sonnet-5.5-tests
   coder: sonnet-5.5
   reviewer: gpt-sol-6.1
 review:
