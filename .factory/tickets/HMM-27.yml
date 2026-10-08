@@ -1,0 +1,80 @@
+# Ticket HMM-27. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-27
+title: MultinomialHmm - document the free trial counts of NTrials
+repo: software-factory/hmmlearn-net
+base: main
+phase: J5
+type: chore
+level: standard
+objective: |
+  Close follow-up issue #32 (questions Q1 and Q2 of the review of HMM-11): MultinomialHmm.Check() does not reject NTrials == null, whereas
+  hmmlearn's MultinomialHMM._check raises ValueError("n_trials must be set"). The pilot read the reference (hmm.py, _emissions.py): the
+  difference is deliberate and must be written down, not removed.
+  - In hmmlearn the likelihood never uses self.n_trials: it takes the total of each row of X. Fit stores the per-sample totals in n_trials
+    when it is None (_check_and_set_n_features), so that _check passes after a fit; a model whose parameters are set by hand needs any
+    non-None n_trials. Only sampling needs a single value ("For sampling, a single n_trials must be given").
+  - In the port NTrials is an int?. A value means: every sample must total NTrials, and sampling uses it. null means: the totals are free,
+    each sample's own total is its number of trials. That is a valid state for inference, for a fit (the totals may vary per sample) and for
+    a model set by hand; only Sample needs a value (InvalidOperationException without it). Adding hmmlearn's check would break the
+    free-totals path that the oracle cases trial-counts-vary-per-sample and trial-counts-inferred-and-varying cover.
+  Deliverable: the XML documentation of this contract, in src/HmmLearn/MultinomialHmm.cs, on the NTrials property, on the nTrials constructor
+  parameter and on Check(). No behavior change: the existing tests that lock the contract stay green. The coder makes the edit (no tests agent).
+scope:
+  writable:
+    - src/HmmLearn/MultinomialHmm.cs
+  read_only:
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - tests/acceptance/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/MultinomialHmm.cs: documentation only; no signature and no behavior change.
+  public int? NTrials { get; set; }
+  protected override void Check();
+
+  The existing tests that already lock the behavior (read-only, they must stay green):
+  - tests/acceptance/HMM-11/InferenceParityTests.cs: the oracle case trial-counts-vary-per-sample scores a hand-set model whose NTrials is null;
+  - tests/acceptance/HMM-11/ValidationTests.cs: totals_may_vary_per_sample_when_n_trials_is_null (a fit), a_sample_whose_total_differs_from_n_trials_throws
+    (NTrials set), a_sample_without_n_trials_cannot_be_drawn (InvalidOperationException).
+  Wording to convey (in your own words, short): null = totals free, each sample's total is its own number of trials; set = every sample must
+  total it and Sample uses it; unlike hmmlearn, Check() has no NTrials rule on purpose, because hmmlearn's "n_trials must be set" exists only
+  because its fit stores the totals in n_trials.
+constraints:
+  - "Documentation only: do not change any code, any test or any other file. If you believe the contract is wrong, say so in a non-blocking question instead of changing it."
+  - "Every statement must be true of the merged code and of the reference: check each one against src/HmmLearn/MultinomialHmm.cs and against reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py and _emissions.py before writing it."
+  - "Keep the XML comments short (a few lines each) and in the style of the surrounding file."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      The tests that lock the free-totals contract of the inference stay green: the oracle inference cases of MultinomialHmm, including
+      trial-counts-vary-per-sample (NTrials null).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm11.InferenceParityTests'
+  - id: C2
+    text: |
+      The tests that lock the NTrials rules stay green: free totals in a fit, the total check when NTrials is set, no sampling without NTrials.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm11.ValidationTests'
+  - id: C3
+    text: |
+      The XML documentation of the NTrials property, of the nTrials constructor parameter and of Check() states the contract above (null =
+      free totals, set = enforced total and used by Sample, no "n_trials must be set" check on purpose and why); every statement is true; no
+      code changed.
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  coder: sonnet-5.5
+  reviewer: gpt-sol-6.1
+review:
+  max_rounds: 2
+context:
+  files:
+    - src/HmmLearn/MultinomialHmm.cs
+    - reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/_emissions.py
+    - tests/acceptance/HMM-11/ValidationTests.cs
