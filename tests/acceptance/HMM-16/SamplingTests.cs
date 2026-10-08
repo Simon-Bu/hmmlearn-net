@@ -168,6 +168,7 @@ public class SamplingTests
     {
         CovarianceType.Spherical => Covars(type)[c, m, 0, 0],
         CovarianceType.Diag => Covars(type)[c, m, 0, f],
+        CovarianceType.Tied => Covars(type)[c, 0, f, f],
         _ => Covars(type)[c, m, f, f],
     };
 

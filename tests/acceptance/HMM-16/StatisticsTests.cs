@@ -288,6 +288,9 @@ public class StatisticsTests
             },
         };
         model.NFeatures = nFeatures;
+        model.StartProb = new[] { 0.6, 0.4 };
+        model.TransMat = new double[,] { { 0.7, 0.3 }, { 0.4, 0.6 } };
+        model.Weights = new double[,] { { 0.5, 0.3, 0.2 }, { 0.2, 0.3, 0.5 } };
         model.RunCheck();
 
         var expected = new Dictionary<char, int>
