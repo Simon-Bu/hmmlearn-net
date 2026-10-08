@@ -1,0 +1,100 @@
+# Ticket HMM-26. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-26
+title: BaseHmm - stationary distribution when it is not unique
+repo: software-factory/hmmlearn-net
+base: main
+phase: J5
+type: bug
+level: standard
+objective: |
+  Fix the gap that the review of HMM-9 left open (follow-up issue #26) in src/HmmLearn/BaseHmm.cs, which is merged. GetStationaryDistribution
+  solves (P^T - I) pi = 0 with a normalization row in place of the last equation. When the transition matrix has several closed classes
+  (the identity, two absorbing states, two disconnected cycles, two ergodic blocks) the stationary distribution is not unique, the system is
+  singular and MathNet's LU returns NaN entries: the pilot saw [NaN, NaN, NaN] for the 3x3 identity and [NaN, NaN, 0] for two absorbing states
+  and a transient state. hmmlearn (base.py get_stationary_distribution: scipy.linalg.eig, the eigenvector of the first eigenvalue of largest
+  real part) returns a valid distribution there, so the port must too.
+  Rule. When the stationary distribution is unique, nothing changes (same code path, same numbers). When it is not, the result is the
+  stationary distribution of the closed class that holds the lowest state index among the closed classes (a closed class is a set of states that
+  reach each other and that no transition leaves), and 0 for every state outside that class. The four non_unique_cases of
+  oracle/golden/stationary.json, computed by hmmlearn 0.3.3 itself, all follow this rule.
+  The coder writes the tests of this ticket and then the fix (no separate tests agent).
+scope:
+  writable:
+    - src/HmmLearn/BaseHmm.cs
+    - tests/acceptance/HMM-26/**
+  read_only:
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - tests/acceptance/HMM-9/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/BaseHmm.cs: the method exists and is merged; no signature change.
+  public double[] GetStationaryDistribution();   // throws InvalidOperationException when TransMat is null (unchanged)
+
+  Semantics after the fix:
+  - unique stationary distribution: unchanged;
+  - not unique: the stationary distribution of the closed class with the lowest minimum state index (computed on that class alone, where it is
+    unique), 0 elsewhere. The result is finite, non-negative, sums to 1 and is a fixed point: pi * TransMat = pi. TransMat is not modified.
+  - Expected values of the non-unique matrices (oracle/golden/stationary.json, non_unique_cases, from hmmlearn 0.3.3):
+    identity 3x3 -> [1, 0, 0]; two absorbing states and a transient state [[1,0,0],[0,1,0],[0.3,0.3,0.4]] -> [1, 0, 0];
+    two disconnected 2-cycles -> [0.5, 0.5, 0, 0]; two ergodic blocks [[.9,.1,0,0],[.2,.8,0,0],[0,0,.5,.5],[0,0,.5,.5]] -> [2/3, 1/3, 0, 0].
+  - The XML summary states the rule for the non-unique case (hmmlearn returns whichever eigenvector LAPACK finds first; the port is
+    deterministic and agrees on the cases above).
+  - Suggested method (the coder may use another correct one): keep the LU solve as the first attempt; when its result has a non-finite entry,
+    find the closed classes by reachability on the graph TransMat[i, j] > 0, take the one with the lowest minimum index and solve the same
+    normalized system restricted to that class.
+
+  Tests (written by the coder FIRST, in tests/acceptance/HMM-26/, namespace HmmLearn.Tests.Acceptance.Hmm26), exactly this file and class
+  (xunit 2 style attributes, `using Xunit` is global):
+  - NonUniqueStationaryTests.cs  -> class NonUniqueStationaryTests
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support): Golden.Load("stationary")
+  returns the JsonElement of oracle/golden/stationary.json; GoldenJson extension methods on JsonElement: Items(), AsDouble(), AsVector(),
+  AsMatrix(), AsString(), Has(name); a property is read with element.GetProperty("name"). Close.Equal(double expected, double actual, string what)
+  and Close.Equal(Array expected, Array actual, string what) apply the oracle tolerance. The existing tests of HMM-9
+  (tests/acceptance/HMM-9/StationaryAndCriteriaTests.cs, read-only) show how a model is built for this method: only TransMat is needed.
+  Cover: every non_unique_cases entry (the oracle values, and the properties finite, non-negative, sum 1, fixed point), plus hand-written
+  controls: the unique periodic matrix [[0,1],[1,0]] -> [0.5, 0.5], and that TransMat is left unchanged.
+constraints:
+  - "Order of work: write the test class, run its verify command on the UNFIXED code and check that it fails for the right reason (NaN entries on the non-unique cases, never a compile error or 'no test matches'); say in the summary of .factory/out/coder.json which tests failed before the fix; only then change src/HmmLearn/BaseHmm.cs."
+  - "Only MathNet.Numerics (already referenced), the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/BaseHmm.cs and the folder tests/acceptance/HMM-26/ change. Keep the public signature; every public member keeps an XML summary."
+  - "Behavior for a unique stationary distribution does not change: the acceptance tests of HMM-9 and of every other merged ticket must stay green."
+  - "The numbers come from the oracle through Golden.Load, compared with Close.Equal. Do not copy golden numbers by hand. Hand-written cases are for invariants and trivial inputs."
+  - "Do not re-implement the method under test inside a test: check the oracle values and properties (sum, non-negative, fixed point), nothing else."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      For every entry of non_unique_cases of oracle/golden/stationary.json, GetStationaryDistribution returns the oracle values, with no NaN, no
+      negative entry, a sum of 1 and pi * TransMat = pi; the periodic unique matrix [[0,1],[1,0]] gives [0.5, 0.5]; TransMat is left unchanged.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm26.NonUniqueStationaryTests'
+  - id: C2
+    text: |
+      A unique stationary distribution is computed exactly as before (the existing cases of oracle/golden/stationary.json and the tests of HMM-9
+      stay green) and the new tests are meaningful: at least one fails on the unfixed code and passes on the fix (the reviewer checks this against
+      the diff and the coder's summary); no test re-implements the code under test.
+  - id: C3
+    text: "The XML summary of GetStationaryDistribution states the rule for the non-unique case; the code stays readable: short methods, no dead code."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  coder: sonnet-5.5
+  reviewer: gpt-sol-6.1
+review:
+  max_rounds: 2
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/base.py
+    - src/HmmLearn/BaseHmm.cs
+    - oracle/README.md
+    - tests/acceptance/HMM-9/StationaryAndCriteriaTests.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
