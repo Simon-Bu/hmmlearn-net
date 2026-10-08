@@ -111,6 +111,22 @@ public abstract partial class AbstractHmm
                     throw new ArgumentException($"x[{i}, {j}] is {x[i, j]}; observations must be finite", nameof(x));
     }
 
+    /// <summary>Number of columns that inference accepts; <see cref="NFeatures"/> by default (null: not known, no check).</summary>
+    protected virtual int? ObservationColumns => NFeatures;
+
+    /// <summary>
+    /// Validates the matrix for inference: <see cref="CheckObservations"/>, then its number of columns must equal
+    /// <see cref="ObservationColumns"/> (not checked while that is null), else <see cref="ArgumentException"/> naming both numbers.
+    /// </summary>
+    private void CheckInferenceInput(double[,] x)
+    {
+        CheckObservations(x);
+        var expected = ObservationColumns;
+        var actual = x.GetLength(1);
+        if (expected.HasValue && actual != expected.Value)
+            throw new ArgumentException($"x has {actual} column(s) but the model expects {expected.Value}", nameof(x));
+    }
+
     /// <summary>Throws <see cref="InvalidOperationException"/> if <see cref="StartProb"/> is null (the model is neither set nor fitted).</summary>
     protected void CheckIsFitted()
     {
@@ -158,12 +174,13 @@ public abstract partial class AbstractHmm
     /// <summary>
     /// Log probability of the data under the model: the sum over sequences of the log probability given by the forward pass
     /// (<see cref="Hmmc"/>), with the flavour of <see cref="Implementation"/>.
+    /// Throws <see cref="ArgumentException"/> (parameter x) if x has a number of columns other than the model expects.
     /// </summary>
     public double Score(double[,] x, int[]? lengths = null)
     {
         CheckIsFitted();
         Check();
-        CheckObservations(x);
+        CheckInferenceInput(x);
         var logProb = 0.0;
         foreach (var subX in InternalUtils.SplitXLengths(x, lengths))
             logProb += ForwardLogProb(subX);
@@ -175,12 +192,13 @@ public abstract partial class AbstractHmm
     /// (n_samples, n_components); each sequence is processed on its own and the posteriors are concatenated in order.
     /// Posteriors with scaling: forward * backward, each row normalized to sum 1. In log space: forward + backward, each row
     /// log-normalized (<see cref="Utils"/>), then exponentiated.
+    /// Throws <see cref="ArgumentException"/> (parameter x) if x has a number of columns other than the model expects.
     /// </summary>
     public (double LogProb, double[,] Posteriors) ScoreSamples(double[,] x, int[]? lengths = null)
     {
         CheckIsFitted();
         Check();
-        CheckObservations(x);
+        CheckInferenceInput(x);
         var total = x.GetLength(0);
         var posteriors = new double[total, NComponents];
         var logProb = 0.0;
@@ -203,12 +221,13 @@ public abstract partial class AbstractHmm
     /// concatenated. <paramref name="algorithm"/> null: <see cref="Algorithm"/>. Viterbi: <see cref="Hmmc.Viterbi"/> on the log
     /// likelihoods of the sequence. Map: the posteriors of <see cref="ScoreSamples"/> of the sequence on its own; the log
     /// probability is the sum of the largest posterior of each sample (as hmmlearn does) and the state is the first index of the maximum.
+    /// Throws <see cref="ArgumentException"/> (parameter x) if x has a number of columns other than the model expects.
     /// </summary>
     public (double LogProb, int[] States) Decode(double[,] x, int[]? lengths = null, DecoderAlgorithm? algorithm = null)
     {
         CheckIsFitted();
         Check();
-        CheckObservations(x);
+        CheckInferenceInput(x);
         algorithm ??= Algorithm;
         var total = x.GetLength(0);
         var states = new int[total];

@@ -61,6 +61,9 @@ public class CategoricalHmm : BaseHmm
         EmissionProb = emissionProb;
     }
 
+    /// <summary>Observations have one column (one symbol per sample); NFeatures is the number of symbols.</summary>
+    protected override int? ObservationColumns => 1;
+
     /// <summary>
     /// Base checks, then: if NFeatures is null it becomes the number of columns of EmissionProb; EmissionProb must be non-null and
     /// (NComponents x NFeatures), else <see cref="ArgumentException"/> ("emissionprob_ must have shape (n_components, n_features)");

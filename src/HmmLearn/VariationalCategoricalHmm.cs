@@ -79,6 +79,9 @@ public class VariationalCategoricalHmm : VariationalBaseHmm
         EmissionProbPosterior = emissionProbPosterior;
     }
 
+    /// <summary>Observations have one column (one symbol per sample); NFeatures is the number of symbols.</summary>
+    protected override int? ObservationColumns => 1;
+
     /// <summary>
     /// Base checks, then <see cref="EmissionProbPriorValues"/> and <see cref="EmissionProbPosterior"/> must be non-null with the same
     /// shape, else <see cref="ArgumentException"/> ("emissionprob_prior_ and emissionprob_posterior_ must have shape (n_components,
