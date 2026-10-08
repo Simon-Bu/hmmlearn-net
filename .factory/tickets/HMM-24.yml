@@ -1,0 +1,89 @@
+# Ticket HMM-24. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-24
+title: Stats - state and lock the null, shape and zero-size contracts of the log density
+repo: software-factory/hmmlearn-net
+base: main
+phase: J5
+type: chore
+level: standard
+objective: |
+  Close follow-up issue #9 (questions Q1 and Q2 of the review of HMM-3). Stats.LogMultivariateNormalDensity (src/HmmLearn/Stats.cs, merged)
+  already behaves as the questions hope: the pilot ran each case below on the merged code. Nothing writes it down and nothing locks it. This
+  ticket states the contracts in the XML summary and locks them with acceptance tests, for the four covariance types:
+  1. A null x, means or covars throws ArgumentNullException (the .NET convention). Every shape violation (x with another number of columns
+     than the means, covars whose shape does not match the covariance type, nComponents and nFeatures) keeps throwing ArgumentException.
+  2. x with 0 rows gives an empty (0, nComponents) matrix. means with 0 rows (no component) give an (n_samples, 0) matrix. x with 0 features
+     gives an (n_samples, nComponents) matrix whose entries are 0 (the log density in dimension 0 is log 1). No exception in these cases.
+  If a combination does not behave as stated, that is a real finding: fix the code minimally and say so in the summary of your report.
+  Question Q3 of the issue (the exit code of the test runner inside the agents' sandbox) needs no change: the orchestrator treats any
+  non-zero exit code as a failure. The coder writes the tests of this ticket (no separate tests agent).
+scope:
+  writable:
+    - src/HmmLearn/Stats.cs
+    - tests/acceptance/HMM-24/**
+  read_only:
+    - src/HmmLearn/HmmLearn.csproj
+    - src/HmmLearn/CovarianceType.cs
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - tests/acceptance/HMM-3/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/Stats.cs: the method exists and is merged; no signature change.
+  public static double[,] LogMultivariateNormalDensity(double[,] x, double[,] means, double[,,] covars, CovarianceType covarianceType = CovarianceType.Diag);
+
+  Compact covariance shapes (oracle/README.md): spherical (nc, 1, 1), diag (nc, 1, nf), full (nc, nf, nf), tied (1, nf, nf).
+  Contracts to state in the XML summary and to lock (observed on the merged code):
+  - null x, null means, null covars -> ArgumentNullException (exact type);
+  - x with a different number of columns than the means, covars of the wrong shape -> ArgumentException (exact type);
+  - x (0, nf) -> result (0, nc); means (0, nf) with covars shaped for nc = 0 (tied: (1, nf, nf)) -> result (n, 0);
+    x (n, 0) with means (nc, 0) and covars shaped for nf = 0 -> result (n, nc), every entry 0 (compare with a tolerance: the sign of a
+    zero is not part of the contract).
+
+  Tests (written by the coder, in tests/acceptance/HMM-24/, namespace HmmLearn.Tests.Acceptance.Hmm24), exactly these files and classes
+  (xunit 2 style attributes, `using Xunit` is global):
+  - NullArgumentTests.cs   -> class NullArgumentTests
+  - ZeroSizeInputTests.cs  -> class ZeroSizeInputTests
+  Read src/HmmLearn/Stats.cs and the tests of HMM-3 first (tests/acceptance/HMM-3/, read-only: ShapeChecksTests already covers the shape
+  errors, do not duplicate it). Hand-written cases are enough, no golden file is needed. Cover the four covariance types with a Theory.
+constraints:
+  - "The behavior already exists, so the tests pass as soon as they are written. A test that fails is a finding about the code, not about the test: check it against the reference reading above, then fix src/HmmLearn/Stats.cs minimally and say so in the summary."
+  - "Only the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/Stats.cs and the folder tests/acceptance/HMM-24/ change. Keep the public signature; the public member keeps an XML summary."
+  - "Behavior for valid inputs does not change: the acceptance tests of HMM-3 and of every other merged ticket must stay green."
+  - "The tests are deterministic and hand-written. Never assert exact equality to 0 or to -infinity for a result that rounding could change; compare zeros with a tolerance."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      A null x, means or covars throws ArgumentNullException (exact type) for each of the four covariance types, and a shape violation
+      still throws ArgumentException (exact type).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm24.NullArgumentTests'
+  - id: C2
+    text: |
+      For each covariance type: x with 0 rows gives an empty (0, nComponents) result, means with 0 rows give an (n_samples, 0) result, and
+      x with 0 features gives an (n_samples, nComponents) result of zeros, without any exception.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm24.ZeroSizeInputTests'
+  - id: C3
+    text: |
+      The XML summary of LogMultivariateNormalDensity states the null and zero-size contracts; the tests are meaningful (each asserts the
+      contract, no tautology) and readable; the code of Stats.cs is unchanged for valid inputs.
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  coder: sonnet-5.5
+  reviewer: gpt-sol-6.1
+review:
+  max_rounds: 2
+context:
+  files:
+    - src/HmmLearn/Stats.cs
+    - tests/acceptance/HMM-3/ShapeChecksTests.cs
+    - oracle/README.md
