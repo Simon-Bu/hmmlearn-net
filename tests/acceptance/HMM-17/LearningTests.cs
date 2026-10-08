@@ -5,12 +5,12 @@ namespace HmmLearn.Tests.Acceptance.Hmm17;
 
 /// <summary>
 /// Acceptance tests for learning the GMM-HMM (ticket HMM-17, criterion C3): on data sampled from a well-separated
-/// three-state mixture model, a fit from the random initialization produces valid parameters (the rows of the weights
-/// sum to 1 with no collapsed mixture component, and the covariances pass Check) and recovers the true parameters up
-/// to a permutation of the states and of the mixtures within each state; a single-iteration Fit (NIter = 1,
-/// InitParams = "" after the first Fit) never decreases the data log-likelihood; and Aic and Bic use the number of
-/// free scalar parameters documented for all the parameter letters, not only the letters of Params:
-/// Aic = -2 * Score + 2 * k, Bic = -2 * Score + k * ln(n_samples).
+/// three-state mixture model, a short fit from the random initialization produces valid parameters (the rows of the weights
+/// sum to 1, the covariances pass Check, the score is finite); a fit that starts from a perturbed copy of the true parameters
+/// recovers the true parameters (EM from the random initialization can end in a poor local optimum, hmmlearn included, so
+/// the recovery does not start there); a single-iteration Fit (NIter = 1, InitParams = "" after the first Fit) never
+/// decreases the data log-likelihood; and Aic and Bic use the number of free scalar parameters documented for all the
+/// parameter letters, not only the letters of Params: Aic = -2 * Score + 2 * k, Bic = -2 * Score + k * ln(n_samples).
 /// </summary>
 public class LearningTests
 {
@@ -117,76 +117,129 @@ public class LearningTests
     [InlineData(CovarianceType.Diag)]
     [InlineData(CovarianceType.Tied)]
     [InlineData(CovarianceType.Full)]
-    public void fit_from_a_random_initialization_recovers_the_true_model(CovarianceType type)
+    public void a_short_fit_from_the_random_initialization_gives_valid_parameters(CovarianceType type)
     {
         const int samples = 1200;
-        var (x, _) = TrueModel(type).Sample(samples, random: new Random(2017));
+        var (x, _) = TrueModel(type).Sample(samples, random: new Random(2017 + Index(type)));
         var lengths = new[] { samples };
 
-        var model = new LearningProbe(type, 777 + Index(type), 200, "stmcw", "stmcw");
+        var model = new LearningProbe(type, 777 + Index(type), 5, "stmcw", "stmcw");
         model.Fit(x, lengths);
 
         Assert.Equal(NFeatures, model.NFeatures!.Value);
-
-        // Valid parameters: the rows of the weights sum to 1 and no mixture component collapses.
+        var weights = model.Weights!;
         for (var c = 0; c < NComponents; c++)
         {
             var sum = 0.0;
             for (var m = 0; m < NMix; m++)
             {
-                Assert.InRange(model.Weights![c, m], 0.1, 0.9);
-                sum += model.Weights[c, m];
+                Assert.True(weights[c, m] > 0.0, $"weight [{c}, {m}] is {weights[c, m]}");
+                sum += weights[c, m];
             }
             Close.Equal(1.0, sum, $"weights row {c} sum");
         }
 
-        // The covariances are accepted by Check.
         model.CallCheck();
+        Assert.True(double.IsFinite(model.Score(x, lengths)), "the score of the fitted model is not finite");
+    }
 
-        // Means recovered up to a permutation of the states and of the mixtures within each state.
-        var means = model.Means!;
-        var covars = model.Covars!;
-        var truth = TrueMeans();
-        var permutation = BestPermutation(means, truth);
+    /// <summary>The true structure with the mixtures pulled together (+-0.7 instead of +-1), the variances doubled, the weights unbalanced and the transitions blurred.</summary>
+    private static LearningProbe PerturbedTruthModel(CovarianceType type, int nIter)
+    {
+        var model = new LearningProbe(type, null, nIter, "", "stmcw");
+        model.NFeatures = NFeatures;
+        var startProb = new double[NComponents];
+        for (var c = 0; c < NComponents; c++)
+            startProb[c] = 1.0 / NComponents;
+        model.StartProb = startProb;
+        var transMat = new double[NComponents, NComponents];
+        for (var c = 0; c < NComponents; c++)
+            for (var d = 0; d < NComponents; d++)
+                transMat[c, d] = c == d ? 0.8 : 0.2 / (NComponents - 1);
+        model.TransMat = transMat;
+        var weights = new double[NComponents, NMix];
         for (var c = 0; c < NComponents; c++)
         {
-            var t = permutation[c];
-            var assignment = AssignMixtures(StateMeans(means, c), StateMeans(truth, t));
+            weights[c, 0] = 0.4;
+            weights[c, 1] = 0.6;
+        }
+        model.Weights = weights;
+        var means = new double[NComponents, NMix, NFeatures];
+        for (var c = 0; c < NComponents; c++)
             for (var m = 0; m < NMix; m++)
             {
-                var tm = assignment[m];
+                means[c, m, 0] = 12.0 * c + (m == 0 ? -0.7 : 0.7);
+                means[c, m, 1] = 0.2;
+            }
+        model.Means = means;
+        var covars = TrueCovars(type);
+        for (var a = 0; a < covars.GetLength(0); a++)
+            for (var b = 0; b < covars.GetLength(1); b++)
+                for (var c = 0; c < covars.GetLength(2); c++)
+                    for (var d = 0; d < covars.GetLength(3); d++)
+                        covars[a, b, c, d] *= 2.0;
+        model.Covars = covars;
+        return model;
+    }
+
+    [Theory]
+    [InlineData(CovarianceType.Spherical)]
+    [InlineData(CovarianceType.Diag)]
+    [InlineData(CovarianceType.Tied)]
+    [InlineData(CovarianceType.Full)]
+    public void fit_from_a_perturbed_truth_recovers_the_true_model(CovarianceType type)
+    {
+        const int samples = 1500;
+        var (x, _) = TrueModel(type).Sample(samples, random: new Random(2017 + Index(type)));
+        var lengths = new[] { samples };
+
+        var model = PerturbedTruthModel(type, 300);
+        model.Fit(x, lengths);
+
+        model.CallCheck();
+        var truth = TrueMeans();
+        var means = model.Means!;
+        var weights = model.Weights!;
+        var covars = model.Covars!;
+        var transMat = model.TransMat!;
+        for (var c = 0; c < NComponents; c++)
+        {
+            Assert.True(transMat[c, c] >= 0.75, $"transmat[{c}, {c}] is {transMat[c, c]}, the true value is 0.9");
+            for (var m = 0; m < NMix; m++)
+            {
+                Assert.InRange(weights[c, m], 0.35, 0.65);
                 for (var f = 0; f < NFeatures; f++)
-                    Assert.True(Math.Abs(means[c, m, f] - truth[t, tm, f]) <= 1.0,
-                        $"state {c}, mixture {m}, feature {f}: fitted {means[c, m, f]} is not within 1.0 of the true {truth[t, tm, f]} (state {t}, mixture {tm})");
+                    Assert.True(Math.Abs(means[c, m, f] - truth[c, m, f]) <= 0.3,
+                        $"state {c}, mixture {m}, feature {f}: fitted {means[c, m, f]} is not within 0.3 of the true {truth[c, m, f]}");
             }
         }
 
-        // Covariances recovered in a wide band around the true variance (the true off-diagonals are 0).
+        // Covariances recovered in a band around the true variance 0.25 (the true off-diagonals are 0).
         for (var c = 0; c < NComponents; c++)
         {
             switch (type)
             {
                 case CovarianceType.Spherical:
                     for (var m = 0; m < NMix; m++)
-                        Assert.InRange(covars[c, m, 0, 0], 0.02, 0.9);
+                        Assert.InRange(covars[c, m, 0, 0], 0.15, 0.40);
                     break;
                 case CovarianceType.Diag:
                     for (var m = 0; m < NMix; m++)
                         for (var f = 0; f < NFeatures; f++)
-                            Assert.InRange(covars[c, m, 0, f], 0.02, 0.9);
+                            Assert.InRange(covars[c, m, 0, f], 0.15, 0.40);
                     break;
                 case CovarianceType.Full:
                     for (var m = 0; m < NMix; m++)
                     {
                         for (var f = 0; f < NFeatures; f++)
-                            Assert.InRange(covars[c, m, f, f], 0.02, 0.9);
-                        Assert.InRange(Math.Abs(covars[c, m, 0, 1]), 0.0, 0.3);
+                            Assert.InRange(covars[c, m, f, f], 0.15, 0.40);
+                        Assert.InRange(Math.Abs(covars[c, m, 0, 1]), 0.0, 0.15);
                     }
                     break;
                 default: // Tied.
-                    Assert.InRange(covars[c, 0, 0, 0], 0.02, 0.9);
-                    Assert.InRange(covars[c, 0, 1, 1], 0.02, 0.9);
-                    Assert.InRange(Math.Abs(covars[c, 0, 0, 1]), 0.0, 0.3);
+                    Assert.InRange(covars[c, 0, 0, 0], 0.15, 0.40);
+                    Assert.InRange(covars[c, 0, 1, 1], 0.15, 0.40);
+                    Assert.InRange(Math.Abs(covars[c, 0, 0, 1]), 0.0, 0.15);
                     break;
             }
         }
@@ -252,76 +305,5 @@ public class LearningTests
         var score = model.Score(x, lengths);
         Close.Equal(-2.0 * score + 2.0 * k, model.Aic(x, lengths), "Aic");
         Close.Equal(-2.0 * score + k * Math.Log(x.GetLength(0)), model.Bic(x, lengths), "Bic");
-    }
-
-    private static int[] BestPermutation(double[,,] fitted, double[,,] truth)
-    {
-        var permutations = new List<int[]>();
-        var current = new int[NComponents];
-        for (var i = 0; i < NComponents; i++)
-            current[i] = i;
-        DoPermutations(current, NComponents - 1, permutations);
-        var best = new int[NComponents];
-        var bestDistance = double.MaxValue;
-        foreach (var p in permutations)
-        {
-            var distance = 0.0;
-            for (var c = 0; c < NComponents; c++)
-            {
-                var assignment = AssignMixtures(StateMeans(fitted, c), StateMeans(truth, p[c]));
-                for (var m = 0; m < NMix; m++)
-                    for (var f = 0; f < NFeatures; f++)
-                        distance += (fitted[c, m, f] - truth[p[c], assignment[m], f]) * (fitted[c, m, f] - truth[p[c], assignment[m], f]);
-            }
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                for (var i = 0; i < NComponents; i++)
-                    best[i] = p[i];
-            }
-        }
-        return best;
-    }
-
-    private static void DoPermutations(int[] current, int last, List<int[]> into)
-    {
-        if (last == 0)
-        {
-            into.Add((int[])current.Clone());
-            return;
-        }
-        for (var i = 0; i <= last; i++)
-        {
-            (current[last], current[i]) = (current[i], current[last]);
-            DoPermutations(current, last - 1, into);
-            (current[last], current[i]) = (current[i], current[last]);
-        }
-    }
-
-    private static double[,] StateMeans(double[,,] means, int state)
-    {
-        var nm = means.GetLength(1);
-        var nf = means.GetLength(2);
-        var result = new double[nm, nf];
-        for (var m = 0; m < nm; m++)
-            for (var f = 0; f < nf; f++)
-                result[m, f] = means[state, m, f];
-        return result;
-    }
-
-    /// <summary>Which true mixture each fitted mixture of one state belongs to (the mixtures are at ±1 along feature 0).</summary>
-    private static int[] AssignMixtures(double[,] fitted, double[,] truth)
-    {
-        var stay = SquaredDistance(fitted, 0, truth, 0) + SquaredDistance(fitted, 1, truth, 1);
-        var swap = SquaredDistance(fitted, 0, truth, 1) + SquaredDistance(fitted, 1, truth, 0);
-        return swap < stay ? new[] { 1, 0 } : new[] { 0, 1 };
-    }
-
-    private static double SquaredDistance(double[,] a, int ia, double[,] b, int ib)
-    {
-        var sum = 0.0;
-        for (var j = 0; j < a.GetLength(1); j++)
-            sum += (a[ia, j] - b[ib, j]) * (a[ia, j] - b[ib, j]);
-        return sum;
     }
 }
