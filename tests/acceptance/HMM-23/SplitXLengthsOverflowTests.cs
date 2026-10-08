@@ -1,4 +1,5 @@
 using HmmLearn;
+using HmmLearn.Tests.Support;
 
 namespace HmmLearn.Tests.Acceptance.Hmm23;
 
@@ -31,9 +32,9 @@ public class SplitXLengthsOverflowTests
         var x = new double[,] { { 1, 2 }, { 3, 4 }, { 5, 6 } };
         var result = InternalUtils.SplitXLengths(x, new[] { 1, 0, 2 });
         Assert.Equal(3, result.Count);
-        Assert.Equal(new double[,] { { 1, 2 } }, result[0]);
-        Assert.Equal(0, result[1].GetLength(0));
-        Assert.Equal(new double[,] { { 3, 4 }, { 5, 6 } }, result[2]);
+        Close.Equal(new double[,] { { 1, 2 } }, result[0], "first sequence");
+        Close.Equal(new double[0, 2], result[1], "empty sequence");
+        Close.Equal(new double[,] { { 3, 4 }, { 5, 6 } }, result[2], "last sequence");
     }
 
     /// <summary>Control: a negative length throws ArgumentException.</summary>
