@@ -52,4 +52,5 @@ Origin: the open follow-up issues of the merged tickets (#6, #9, #14, #26, #32, 
 25. `Hmmc`: `ComputeLogXiSum` on zero samples (`ext/_hmmc.cpp`).
 26. `BaseHmm`: stationary distribution when it is not unique (`base.py`).
 27. `MultinomialHmm`: lock the free trial counts of `NTrials` (`hmm.py`, `_emissions.py`).
-28. `PoissonHmm`: inference rejects a wrong number of columns (`_emissions.py`).
+28. `AbstractHmm`: inference rejects a wrong number of columns, whatever the model (`_emissions.py`).
+29. `Hmmc`: wording of the 0-sample result in the xi sum summaries (`ext/_hmmc.cpp`).
