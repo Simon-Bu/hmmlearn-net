@@ -1,0 +1,145 @@
+# Ticket HMM-22. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-22
+title: VariationalGaussianHmm - M-step of the means and covariances
+repo: software-factory/hmmlearn-net
+base: main
+phase: J4
+type: feature
+level: standard
+objective: |
+  Complete VariationalGaussianHmm with the M-step of the means ("m") and the covariances ("c") of the four covariance types (port of
+  VariationalGaussianHMM._do_mstep of hmmlearn/vhmm.py): the class gets its DoMStep override in the new partial file
+  src/HmmLearn/VariationalGaussianHmm.Learning.cs (committed as a stub whose body already calls the base update and throws
+  NotImplementedException only when 'm' or 'c' is in Params). With it the model fits end to end and reproduces every fit case of the
+  oracle.
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/vhmm.py lines 697-784 (_do_mstep); its tests
+  reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_variational_gaussian.py; and the numbers of oracle/golden/variational_gaussian_<type>.json
+  (spherical, diag, tied and full; structure in oracle/README.md; do not open the JSON files whole, they are large).
+scope:
+  writable:
+    - src/HmmLearn/VariationalGaussianHmm.Learning.cs
+  read_only:
+    - src/HmmLearn/VariationalGaussianHmm.cs
+    - src/HmmLearn/VariationalBaseHmm.cs
+    - src/HmmLearn/GaussianEmission.cs
+    - src/HmmLearn/KlDivergence.cs
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/AbstractHmm.Fit.cs
+    - src/HmmLearn/SufficientStatistics.cs
+    - src/HmmLearn/CovarianceType.cs
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/InternalUtils.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/VariationalGaussianHmm.Learning.cs (committed as a stub; the coder writes the body)
+  namespace HmmLearn;
+  public partial class VariationalGaussianHmm
+  {
+      protected override void DoMStep(SufficientStatistics stats);
+  }
+  Already merged and usable: the whole of VariationalGaussianHmm.cs (properties MeansPriorValues, MeansPosterior, BetaPriorValues,
+  BetaPosterior, DofPriorValues, DofPosterior, ScalePriorValues, ScalePosterior, Covars, CovarianceType, Params; the Covars setter
+  validates and copies), VariationalBaseHmm (DoMStep of the start and transitions: call base.DoMStep(stats) first), GaussianStatistics
+  (Post, Obs, Obs2, ObsObsT; ObsObsT is non-null for Full and Tied only).
+
+  Semantics: the XML comment of the stub is the specification; follow vhmm.py. In particular
+  - the 'c' update uses the BetaPosterior and MeansPosterior that the 'm' update has just written when Params contains 'm', and the current
+    ones otherwise; new arrays replace the old ones (never mutate in place the arrays that were passed in or stored earlier);
+  - Covars in the M-step: assign it through the Covars property (it validates and copies); a degenerate value that the setter rejects
+    makes the M-step throw ArgumentException (a documented deviation of the port: hmmlearn stores it unchecked), so valid fits behave
+    identically;
+  - the shapes are the compact uniform ones: spherical (nc, 1, 1), diag (nc, 1, nf), full (nc, nf, nf), tied (1, nf, nf);
+  - the spherical scale update takes the MEAN over the features of the per-feature term, the tied update sums over the states.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-22/, namespace HmmLearn.Tests.Acceptance.Hmm22, exactly
+  these files and classes (xunit 2, `using Xunit` is global):
+  - FitParityTests.cs     -> class FitParityTests     (every fit case of the 4 oracle files, both implementations)
+  - MStepTests.cs         -> class MStepTests         (DoMStep alone on hand-made statistics, per type and per letter)
+  - FitBehaviourTests.cs  -> class FitBehaviourTests  (monotone lower bound, parameter subsets, covariance types agree on isotropic data)
+  The MStepTests define `class ExposedModel : VariationalGaussianHmm` with a public wrapper `public void RunMStep(SufficientStatistics s) => DoMStep(s);`
+  and build the statistics with `new GaussianStatistics(nc, nf, covarianceType)` filled by hand (Post, Obs, Obs2, ObsObsT) plus the base Start and
+  Trans arrays.
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("variational_gaussian_full") (and _spherical, _diag, _tied) returns the JsonElement of the file.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsTensor3(), AsInts(), AsString(),
+    AsBool(), Has(name); a property is read with element.GetProperty("name").
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12).
+  Golden file oracle/golden/variational_gaussian_<type>.json fit_cases: each has name, constructor {n_components, covariance_type, params,
+  n_iter, tol}, init {startprob_prior, startprob_posterior, transmat_prior, transmat_posterior, means_prior, means_posterior, beta_prior,
+  beta_posterior, dof_prior, dof_posterior, scale_prior, scale_posterior, covars} (the explicit starting parameters: build the model with
+  InitParams = "" and set StartProbPriorValues, StartProbPosterior, TransMatPriorValues, TransMatPosterior, MeansPriorValues, MeansPosterior,
+  BetaPriorValues, BetaPosterior, DofPriorValues, DofPosterior, ScalePriorValues, ScalePosterior and Covars), X, lengths and expected
+  {startprob_posterior, transmat_posterior, means_posterior, beta_posterior, dof_posterior, scale_posterior, covars, startprob, transmat,
+  history (Monitor.History), n_iter_done, converged, score}. Cases: ten-iterations (stmc), defaults-100-iterations-max (stmc),
+  start-transitions-means-without-covars (stm), start-and-transitions-only (st). Run every case with Implementation.Log and
+  Implementation.Scaling; a null expected value means "do not compare".
+  The MStepTests expected values are computed in the test from the formulas of the stub's XML comment with plain loops (tiny one- and
+  two-feature cases with simple numbers), not by copying golden numbers; the FitBehaviourTests check that the lower bound
+  (Monitor.History) never decreases by more than 1e-9 relative on data sampled from a two-state, two-feature model for each covariance type.
+constraints:
+  - "Only MathNet.Numerics (already referenced), the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/VariationalGaussianHmm.Learning.cs changes. Keep the signature above; the member keeps an XML summary. No other file may change."
+  - "Do not mutate the arrays a caller passes in or the arrays stored in the model earlier; every updated array is a new array."
+  - "The tests are deterministic: the numbers come from the oracle through Golden.Load, compared with Close.Equal, or from the formulas of the stub computed in the test with plain loops. Do not copy golden numbers by hand."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field (id, verify, description, recommended, test_disputes...) makes the validator refuse the report and costs a whole attempt."
+  - "Keep your reasoning short: one reply that runs out of tokens (max-tokens) loses the whole attempt (HMM-6: 25 minutes of reasoning about the last digit of a formatted number, then nothing written). If a locked test still fails after two fixes and you cannot explain it, stop and write .factory/out/coder.json with status blocked and a question that gives the test, the expected and the actual value: the pilot answers. Never re-derive floating-point or library behaviour from bits: run a one-line experiment with the other API instead (F8 against a custom format string, Math.Round...). Custom numeric format strings round a 15-digit expansion, F8 and G17 are exact."
+  - "Statistical assertions (recovery of parameters, agreement between covariance types, a fit that finds the true model) must hold for ANY correct implementation, hmmlearn included: start such a fit from explicit parameters near the truth (InitParams \"\") with wide tolerances, never from the random initialization, which can end in a poor local optimum or in a NaN row (HMM-17). From the random initialization assert only validity (shapes, rows summing to 1, finite values) and the monotone lower bound."
+  - "Do not re-implement an algorithm inside a test (Viterbi, forward-backward, a sampler, a normal density): a test-side copy is the likeliest source of a wrong locked test (HMM-20: the Viterbi helper forgot a transition term and updated its state in place, and the coder had to dispute it). Take the expected number from the oracle, or check a property that needs no algorithm (a row sums to 1, Score equals the sum of the per-sequence scores, Decode returns states in range, the log probability of Decode is at most the score)."
+  - "Two traps of the locked tests of HMM-21, which failed 16 of 91 cases whatever the implementation: (1) Array.CopyTo throws ArgumentException for a destination of rank 2 or more: copy a multidimensional array with (double[,])a.Clone() or (double[,,])a.Clone(); (2) the score of one sequence of 7 samples is not the sum of the scores of two sequences of 3 and 4: to compare them pass the lengths { 3, 4 }, never { 7 }."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes: each item has exactly two fields, test (the exact test name) and argument (your argument, with the fix you propose written inside it); any other field, such as fix, makes the validator refuse the whole report and costs an attempt (HMM-16). Never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      Fit reproduces the six posterior arrays, covars, startprob, transmat, history, n_iter_done, converged and score of every fit case of
+      the four oracle files (spherical, diag, tied, full) with both implementations (all of stmc, stm without covars, st, ten and up to a
+      hundred iterations).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm22.FitParityTests'
+  - id: C2
+    text: |
+      DoMStep on hand-made statistics updates exactly the arrays of the letters in Params: 'm' sets BetaPosterior and MeansPosterior, 'c' sets
+      DofPosterior, ScalePosterior and Covars for each of the four covariance types (values from the formulas, tied sums over the states,
+      spherical averages over the features), uses the new means when both letters are given and the stored ones when only 'c' is given, and
+      leaves the arrays of the other letters alone.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm22.MStepTests'
+  - id: C3
+    text: |
+      The lower bound never decreases during Fit for each covariance type (single-iteration fits from k-means initialization with a fixed seed,
+      both implementations); the full, tied, diag and spherical models agree on the parameters they share when the data are isotropic;
+      a fit with only 'c' or only 'm' in Params runs and changes only its arrays.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm22.FitBehaviourTests'
+  - id: C4
+    text: "The code stays readable: short methods (one helper per covariance type), no dead code, the XML summary matches the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/vhmm.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_variational_gaussian.py
+    - oracle/README.md
+    - src/HmmLearn/VariationalGaussianHmm.Learning.cs
+    - src/HmmLearn/VariationalGaussianHmm.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
