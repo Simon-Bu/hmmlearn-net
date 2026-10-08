@@ -80,9 +80,7 @@ public partial class GmmHmm : BaseHmm
     /// <summary>The structure of the covariance parameters (spherical, diag, full, tied).</summary>
     public CovarianceType CovarianceType { get; set; }
 
-    /// <summary>
-    /// Floor on the diagonal of the covariance matrices (added on the diagonal when a Cholesky factorization fails in the sampling).
-    /// </summary>
+    /// <summary>Floor added to the diagonal of the data covariance when the covariances are initialized.</summary>
     public double MinCovar { get; set; }
 
     /// <summary>Parameter of the symmetric Dirichlet prior of each row of <see cref="Weights"/>.</summary>
