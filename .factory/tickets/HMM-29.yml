@@ -1,0 +1,60 @@
+# Ticket HMM-29. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-29
+title: Hmmc - wording of the 0-sample result in the xi sum summaries
+repo: software-factory/hmmlearn-net
+base: main
+phase: J5
+type: chore
+level: standard
+objective: |
+  Close follow-up issue #67, the minor remark that the review of HMM-25 left open on its own XML text in src/HmmLearn/Hmmc.ViterbiXi.cs.
+  The summary of ComputeLogXiSum says "With 0 samples (all inputs (0, nc))", which wrongly includes transmat: the transition matrix is
+  (nc, nc) for 0 samples too. Say that fwdlattice, bwdlattice and logFrameprob are (0, nc) while transmat is (nc, nc). While there, make
+  the summary of ComputeScalingXiSum say the same for its own 0-sample result (an (nc, nc) matrix of zeros, as for one sample), so that the
+  two siblings are documented alike. Documentation only: no code, no test, no other file changes. The coder makes the edit (no tests agent).
+scope:
+  writable:
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+  read_only:
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/Hmmc.ViterbiXi.cs: documentation only; no signature and no behavior change.
+  public static double[,] ComputeScalingXiSum(double[,] fwdlattice, double[,] transmat, double[,] bwdlattice, double[,] frameprob);
+  public static double[,] ComputeLogXiSum(double[,] fwdlattice, double[,] transmat, double[,] bwdlattice, double[,] logFrameprob);
+
+  Facts to state (the behavior is locked by tests/acceptance/HMM-25/ZeroSampleXiSumTests.cs, read-only): with 0 samples fwdlattice, bwdlattice
+  and the frame probabilities are (0, nc) and transmat is (nc, nc); ComputeLogXiSum returns a new (nc, nc) matrix of -infinity without reading
+  the last row of fwdlattice; ComputeScalingXiSum returns an (nc, nc) matrix of zeros; shape errors keep throwing ArgumentException "shape mismatch".
+constraints:
+  - "Documentation only: do not change any code, any test or any other file."
+  - "Every statement must be true of the merged code: check it against src/HmmLearn/Hmmc.ViterbiXi.cs and tests/acceptance/HMM-25/ZeroSampleXiSumTests.cs before writing it."
+  - "Keep the XML comments in the style of the surrounding file; change only the sentences about 0 samples."
+  - "Run the verify command exactly as written (dotnet run ...): it prints each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      The tests that lock the 0-sample behavior stay green (no behavior change).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm25.ZeroSampleXiSumTests'
+  - id: C2
+    text: |
+      The XML summary of ComputeLogXiSum says that fwdlattice, bwdlattice and logFrameprob are (0, nc) and transmat is (nc, nc) for 0 samples;
+      the summary of ComputeScalingXiSum states its 0-sample result; every statement is true; only comments changed.
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  coder: sonnet-5.5
+  reviewer: gpt-sol-6.1
+review:
+  max_rounds: 2
+context:
+  files:
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+    - tests/acceptance/HMM-25/ZeroSampleXiSumTests.cs
