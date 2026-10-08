@@ -115,29 +115,69 @@ public abstract class BaseHmm : AbstractHmm
 
     /// <summary>
     /// The stationary distribution of the transition matrix: the left eigenvector for the eigenvalue of largest real part (1),
-    /// normalized to sum 1 (for example through an eigen decomposition of the transposed matrix with MathNet.Numerics, or by solving
-    /// the linear system). Throws <see cref="InvalidOperationException"/> if <see cref="AbstractHmm.TransMat"/> is null.
+    /// normalized to sum 1, found by solving the linear system (P^T - I) pi = 0 with a normalization row. When it is not unique
+    /// (several closed classes: sets of states that reach each other and that no transition leaves) the result is the stationary
+    /// distribution of the closed class holding the lowest state index, and 0 for every state outside it (hmmlearn returns whichever
+    /// eigenvector LAPACK finds first; this port is deterministic). Throws <see cref="InvalidOperationException"/> if
+    /// <see cref="AbstractHmm.TransMat"/> is null.
     /// </summary>
     public double[] GetStationaryDistribution()
     {
         if (TransMat == null)
             throw new InvalidOperationException("the model is neither set nor fitted: TransMat is null");
 
-        var nc = NComponents;
-        var system = new DenseMatrix(nc, nc);
-        for (var i = 0; i < nc; i++)
-            for (var j = 0; j < nc; j++)
-                system[i, j] = TransMat[j, i] - (i == j ? 1.0 : 0.0);
+        var classes = ClosedClasses(TransMat);
+        var states = classes.Count > 1 ? classes[0] : Enumerable.Range(0, NComponents).ToArray();
+        var solved = SolveStationary(TransMat, states);
+        var stationary = new double[NComponents];
+        for (var k = 0; k < states.Length; k++)
+            stationary[states[k]] = solved[k];
+        return stationary;
+    }
 
-        // The last equation is replaced by the normalization: the entries sum to 1 (for a stochastic matrix the eigenvalue of
-        // largest real part is 1, so this is the left eigenvector of the transposed matrix, as in hmmlearn).
-        for (var j = 0; j < nc; j++)
-            system[nc - 1, j] = 1.0;
-        var right = new DenseMatrix(nc, 1);
-        right[nc - 1, 0] = 1.0;
+    /// <summary>The closed classes of the transition graph (edges where the probability is positive), each in increasing order, sorted by minimum index.</summary>
+    private static List<int[]> ClosedClasses(double[,] transMat)
+    {
+        var n = transMat.GetLength(0);
+        var reach = new bool[n, n];
+        for (var i = 0; i < n; i++)
+            for (var j = 0; j < n; j++)
+                reach[i, j] = i == j || transMat[i, j] > 0.0;
+        for (var k = 0; k < n; k++)
+            for (var i = 0; i < n; i++)
+                for (var j = 0; j < n; j++)
+                    reach[i, j] |= reach[i, k] && reach[k, j];
+
+        // A state belongs to a closed class when every state it reaches reaches it back; the class is then its reachable set.
+        var classes = new List<int[]>();
+        var seen = new bool[n];
+        for (var i = 0; i < n; i++)
+        {
+            if (seen[i] || Enumerable.Range(0, n).Any(j => reach[i, j] && !reach[j, i]))
+                continue;
+            var members = Enumerable.Range(0, n).Where(j => reach[i, j]).ToArray();
+            foreach (var j in members)
+                seen[j] = true;
+            classes.Add(members);
+        }
+        return classes;
+    }
+
+    /// <summary>Solves (P^T - I) pi = 0 on the given states, the last equation replaced by the normalization (the entries sum to 1).</summary>
+    private static double[] SolveStationary(double[,] transMat, int[] states)
+    {
+        var n = states.Length;
+        var system = new DenseMatrix(n, n);
+        for (var i = 0; i < n; i++)
+            for (var j = 0; j < n; j++)
+                system[i, j] = transMat[states[j], states[i]] - (i == j ? 1.0 : 0.0);
+        for (var j = 0; j < n; j++)
+            system[n - 1, j] = 1.0;
+        var right = new DenseMatrix(n, 1);
+        right[n - 1, 0] = 1.0;
         var result = system.LU().Solve(right);
-        var stationary = new double[nc];
-        for (var i = 0; i < nc; i++)
+        var stationary = new double[n];
+        for (var i = 0; i < n; i++)
             stationary[i] = result[i, 0];
         return stationary;
     }
