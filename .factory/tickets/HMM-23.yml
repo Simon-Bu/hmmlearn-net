@@ -1,0 +1,96 @@
+# Ticket HMM-23. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-23
+title: InternalUtils - lengths sum without overflow and covariances without features
+repo: software-factory/hmmlearn-net
+base: main
+phase: J5
+type: bug
+level: standard
+objective: |
+  Fix the two gaps that the review of HMM-2 left open (follow-up issue #6) in src/HmmLearn/InternalUtils.cs, which is already merged:
+  1. SplitXLengths adds the lengths in an int. A sum that wraps around 2^31 can equal the number of rows, bypass the sum check and end in an
+     undocumented exception or a huge allocation. The reference (numpy int64 cumsum, split_X_lengths in
+     reference/hmmlearn-0.3.3/src/hmmlearn/_utils.py) raises ValueError there, so the port must throw the documented ArgumentException.
+  2. ValidateCovars throws IndexOutOfRangeException for a covariance without features: tied shape (1, 0, 0) or full shape (nc, 0, 0). The
+     reference (_validate_covars, same file) accepts them: a 0 x 0 matrix is symmetric and has no eigenvalue to reject.
+scope:
+  writable:
+    - src/HmmLearn/InternalUtils.cs
+  read_only:
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - tests/acceptance/HMM-2/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/InternalUtils.cs: both methods exist and are merged; no signature changes.
+  public static List<double[,]> SplitXLengths(double[,] x, int[]? lengths);
+  public static void ValidateCovars(double[,,] covars, CovarianceType covarianceType, int nComponents);
+
+  Semantics after the fix:
+  - SplitXLengths: the sum of the lengths is computed without overflow (a long holds any sum of int values). A sum that is not the number of
+    rows throws ArgumentException (the documented sum check), whatever the 32-bit arithmetic would give. Every other behavior is unchanged
+    (null lengths, negative length, new matrices for the rows, zero length).
+  - ValidateCovars: a matrix without features (n = 0) is vacuously symmetric and positive definite, so tied (1, 0, 0) and full (nComponents, 0, 0)
+    are accepted and the method returns. The shape checks and every other rule are unchanged: a full tensor (2, 0, 0) with nComponents = 3,
+    and a tied tensor (2, 0, 0), still throw ArgumentException.
+  - The XML summaries of both methods state these rules.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-23/, namespace HmmLearn.Tests.Acceptance.Hmm23, exactly these
+  files and classes (xunit 2 style attributes, `using Xunit` is global):
+  - SplitXLengthsOverflowTests.cs  -> class SplitXLengthsOverflowTests
+  - ZeroFeatureCovarsTests.cs      -> class ZeroFeatureCovarsTests
+
+  This is a bug ticket: the code exists. Read src/HmmLearn/InternalUtils.cs and the tests of HMM-2 first (tests/acceptance/HMM-2/, read-only).
+  Hand-written cases are enough, no golden file is needed. Each class must contain tests that FAIL on the current code (the two defects) and
+  may add control tests that already pass (documented behavior that must not change).
+  Overflow cases: use matrices with ZERO columns (new double[0, 0], new double[2, 0]) so that no test allocates memory.
+  - lengths { 1073741824, 1073741824, 1073741824, 1073741824 } (true sum 2^32, wraps to 0) with x of 0 rows -> ArgumentException;
+  - lengths { int.MaxValue, int.MaxValue, 4 } (true sum 2^32 + 2, wraps to 2) with x of 2 rows -> ArgumentException;
+  - controls: a valid split of a small matrix, a negative length and a plain wrong sum keep their documented results.
+  Zero-feature cases: ValidateCovars does not throw for full new double[3, 0, 0] with nComponents 3 and for tied new double[1, 0, 0]; it
+  still throws ArgumentException (exact type) for full new double[2, 0, 0] with nComponents 3 and for tied new double[2, 0, 0].
+constraints:
+  - "Only the .NET base class library, MathNet.Numerics (already referenced) and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/InternalUtils.cs changes. Keep the public signatures above; every public member keeps an XML summary."
+  - "Behavior for valid inputs does not change: the acceptance tests of HMM-2 and of every other merged ticket must stay green."
+  - "The tests are deterministic and hand-written; at most three exact numeric assertions. Never assert exact equality to 0 or to -infinity for a result that rounding could change."
+  - "Each test class compiles against the current code and FAILS on it with an assertion failure or an unexpected exception (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field makes the validator refuse the report and costs a whole attempt."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes: each item has exactly two fields, test (the exact test name) and argument (your argument, with the fix you propose written inside it); any other field makes the validator refuse the whole report and costs an attempt. Never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      SplitXLengths throws ArgumentException when the sum of the lengths is not the number of rows, even when the 32-bit sum wraps around to
+      the number of rows (lengths of 4 x 2^30 on 0 rows, lengths { int.MaxValue, int.MaxValue, 4 } on 2 rows); valid, negative and wrong-sum
+      inputs keep their documented results.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm23.SplitXLengthsOverflowTests'
+  - id: C2
+    text: |
+      ValidateCovars accepts covariances without features (tied (1, 0, 0), full (nComponents, 0, 0)) and keeps rejecting the shapes that do
+      not match nComponents with ArgumentException.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm23.ZeroFeatureCovarsTests'
+  - id: C3
+    text: "The XML summaries of the two methods state the new rules; the code stays readable: short methods, no dead code."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: sonnet-5.5-tests
+  coder: sonnet-5.5
+  reviewer: gpt-sol-6.1
+review:
+  max_rounds: 2
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/_utils.py
+    - src/HmmLearn/InternalUtils.cs
+    - tests/acceptance/HMM-2/SplitXLengthsTests.cs
+    - tests/acceptance/HMM-2/ValidateCovarsTests.cs
