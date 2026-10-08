@@ -23,7 +23,11 @@ public static class Stats
     /// the density is -0.5 * (nf * log(2 pi) + sum y^2 + logdet) with L y = x - mean and logdet = 2 * sum log(L[i,i]).</item>
     /// </list>
     /// A covariance array whose shape does not match the covariance type, or x with a different number of features than the means,
-    /// throws <see cref="ArgumentException"/>.
+    /// throws <see cref="ArgumentException"/>. A null <paramref name="x"/>, <paramref name="means"/> or <paramref name="covars"/>
+    /// throws <see cref="ArgumentNullException"/>. Zero-size inputs are valid and never throw: x with 0 rows gives an empty
+    /// (0, n_components) matrix; means with 0 rows (no component; covars shaped for nc = 0, tied (1, nf, nf)) give an (n_samples, 0)
+    /// matrix; x and means with 0 features (covars shaped for nf = 0) give an (n_samples, n_components) matrix of zeros
+    /// (the log density in dimension 0 is log 1).
     /// </summary>
     public static double[,] LogMultivariateNormalDensity(double[,] x, double[,] means, double[,,] covars,
         CovarianceType covarianceType = CovarianceType.Diag)
