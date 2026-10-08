@@ -1,0 +1,177 @@
+# Ticket HMM-16. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-16
+title: GmmHmm - parameters, checks, likelihood, sampling and statistics
+repo: software-factory/hmmlearn-net
+base: main
+phase: J3
+type: feature
+level: standard
+objective: |
+  Port the first half of GMMHMM of hmmlearn/hmm.py and BaseGMMHMM of hmmlearn/_emissions.py to C#: the partial class HmmLearn.GmmHmm
+  (derived from BaseHmm), whose emission in each state is a mixture of Gaussians, with its parameters, the compact covariance
+  storage, the checks, the likelihood, the sampling and the sufficient statistics of the E-step, plus GmmStatistics. The initialization
+  and the M-step (second file of the class) come in the next ticket: here a model is used with explicit parameters (InitParams = "").
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py lines 390-531 (GMMHMM: constructor, docstring), 593-732 (_init_covar_priors,
+  _fix_priors_shape, _check) and reference/hmmlearn-0.3.3/src/hmmlearn/_emissions.py lines 184-307 (BaseGMMHMM); its tests
+  reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_gmm_hmm.py, test_gmm_hmm_multisequence.py and test_gmm_hmm_new.py; and the numbers
+  of oracle/golden/gmm_spherical.json, gmm_diag.json, gmm_tied.json and gmm_full.json (inference_cases; structure in oracle/README.md; do
+  not open the JSON files whole, they are large).
+scope:
+  writable:
+    - src/HmmLearn/GmmHmm.cs
+  read_only:
+    - src/HmmLearn/GmmHmm.Learning.cs
+    - src/HmmLearn/GaussianEmission.cs
+    - src/HmmLearn/GaussianHmm.cs
+    - src/HmmLearn/BaseHmm.cs
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/AbstractHmm.Fit.cs
+    - src/HmmLearn/SufficientStatistics.cs
+    - src/HmmLearn/CovarianceType.cs
+    - src/HmmLearn/DecoderAlgorithm.cs
+    - src/HmmLearn/Implementation.cs
+    - src/HmmLearn/ConvergenceMonitor.cs
+    - src/HmmLearn/Hmmc.ForwardBackward.cs
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/InternalUtils.cs
+    - src/HmmLearn/Stats.cs
+    - src/HmmLearn/KMeans.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/GmmHmm.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public class GmmStatistics : SufficientStatistics
+  {
+      public GmmStatistics(int nComponents, int nMix, int nFeatures, double meansWeight, double meansPrior, int[] covarsShape);
+      public double[,] PostMixSum { get; set; }  public double[] PostSum { get; set; }
+      public double[,,] MN { get; set; }  public double[,,,] CN { get; set; }
+  }
+  public partial class GmmHmm : BaseHmm            // GmmHmm.Learning.cs holds Init and DoMStep (read-only here)
+  {
+      public GmmHmm(int nComponents = 1, int nMix = 1, double minCovar = 1e-3, double startProbPrior = 1.0, double transMatPrior = 1.0,
+          double weightsPrior = 1.0, double meansPrior = 0.0, double meansWeight = 0.0, double? covarsPrior = null,
+          double? covarsWeight = null, DecoderAlgorithm algorithm = DecoderAlgorithm.Viterbi,
+          CovarianceType covarianceType = CovarianceType.Diag, int? randomState = null, int nIter = 10, double tol = 1e-2,
+          bool verbose = false, string @params = "stmcw", string initParams = "stmcw", Implementation implementation = Implementation.Log);
+      public int NMix { get; set; }  public CovarianceType CovarianceType { get; set; }  public double MinCovar { get; set; }
+      public double WeightsPrior { get; set; }  public double MeansPrior { get; set; }  public double MeansWeight { get; set; }
+      public double? CovarsPrior { get; set; }  public double? CovarsWeight { get; set; }
+      public double[,]? Weights { get; set; }  public double[,,]? Means { get; set; }  public double[,,,]? Covars { get; set; }
+      public double EffectiveCovarsPrior { get; }  public double EffectiveCovarsWeight { get; }
+      protected override void Check();
+      protected override double[,] ComputeLogLikelihood(double[,] x);
+      protected override SufficientStatistics InitializeSufficientStatistics();
+      protected override void AccumulateSufficientStatistics(SufficientStatistics stats, double[,] x, double[,] lattice,
+          double[,] posteriors, double[,] fwdlattice, double[,] bwdlattice);
+      protected override double[] GenerateSampleFromState(int state, Random random);
+      protected override IReadOnlyDictionary<char, int>? GetNFitScalarsPerParam();
+  }
+  Already merged and usable: BaseHmm, AbstractHmm (Fit, Score, ScoreSamples, Decode, Predict, PredictProba, Sample, NeedsInit,
+  CheckSum1, RaiseWarning), Stats.LogMultivariateNormalDensity (uniform shapes: spherical (n,1,1), diag (n,1,nf), full (n,nf,nf), tied
+  (1,nf,nf) for a group of n components), GaussianEmission.GenerateSample (internal), Hmmc.LogSumExp (internal), Utils.LogNormalize,
+  InternalUtils, MathNet.Numerics (symmetric eigen decomposition). Base members that an override must call: base.Check(),
+  base.AccumulateSufficientStatistics(...). The InternalsVisibleTo of the library makes internal helpers visible to the tests.
+
+  Semantics: the XML comments of the stubs are the specification; follow hmm.py and _emissions.py. In particular
+  - the compact rank-4 covariance shapes: spherical (nc,nm,1,1), diag (nc,nm,1,nf), full (nc,nm,nf,nf), tied (nc,1,nf,nf); for one state
+    the group of its components is passed to Stats as shapes spherical (nm,1,1), diag (nm,1,nf), full (nm,nf,nf), tied (1,nf,nf);
+  - the likelihood of a state is the log-sum-exp over its mixture components of log(weight) + log Gaussian density; the statistics
+    use, for each state, the posterior of each component within the state (the log weighted densities log-normalized over the
+    components) multiplied by the state posterior;
+  - Params gating: the means statistic MN is accumulated when 'm' is in Params, the covariance statistic CN when 'c' is in Params
+    (PostMixSum and PostSum always); GmmStatistics starts MN at MeansWeight * MeansPrior in every entry;
+  - Check validates spherical and diag variances as NON-NEGATIVE (a zero one only raises the "Degenerate mixture covariance" warning),
+    and tied and full matrices as symmetric with a smallest eigenvalue not negative (zero only raises a warning);
+  - EffectiveCovarsPrior and EffectiveCovarsWeight give the hmmlearn defaults per covariance type when the nullable properties are null.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-16/, namespace HmmLearn.Tests.Acceptance.Hmm16, exactly
+  these files and classes (xunit 2 style attributes, `using Xunit` is global):
+  - InferenceParityTests.cs  -> class InferenceParityTests  (oracle inference_cases of the four covariance types, both implementations)
+  - ValidationTests.cs       -> class ValidationTests       (Check, shapes, weights, covariances, effective priors)
+  - SamplingTests.cs         -> class SamplingTests         (Sample for the four covariance types)
+  - StatisticsTests.cs       -> class StatisticsTests       (the GmmStatistics given to DoMStep after an E-step)
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("gmm_spherical") (and gmm_diag, gmm_tied, gmm_full) return the JsonElement of the files.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsTensor3(), AsTensor4(), AsInts(),
+    AsString(), AsBool(), Has(name); a property is read with element.GetProperty("name"). A covariance type is the lowercase string of
+    the case: Enum.Parse<CovarianceType>(text, ignoreCase: true).
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12). States are compared with Assert.Equal on int[].
+  Golden files: inference_cases {name, n_components, n_mix, n_features, covariance_type, startprob, transmat, weights, means (nc,nm,nf),
+  covars (compact rank 4), X, lengths, expected {score, log_prob, posteriors, viterbi {log_prob, states}, map {log_prob, states}}}: build
+  the model with InitParams = "" and set StartProb, TransMat, Weights, Means and Covars (copies), then Score, ScoreSamples, Decode with both
+  algorithms, Predict and PredictProba, with Implementation.Log and Implementation.Scaling. The fit_cases belong to the next ticket.
+  Statistics tests: a test subclass of GmmHmm overrides DoMStep to keep the GmmStatistics it receives; Fit runs one iteration (NIter = 1,
+  InitParams = "", Params with and without 'm', 'c', 'w'); the expected sums are computed in the test with plain loops from the
+  posteriors of PredictProba and the mixture posteriors computed from Stats and the weights (or checked as invariants: PostMixSum rows
+  sum to PostSum, PostSum sums to the number of samples). Sampling tests use fixed seeds, large samples and wide tolerances (at least 5
+  standard errors): the mean of a state near the weight-averaged component means.
+constraints:
+  - "Only MathNet.Numerics (already referenced), the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/GmmHmm.cs changes. Keep every signature above; every public, protected and internal member keeps an XML summary. No abstract member may be added."
+  - "Do not mutate the arrays a caller passes in; the properties hold the arrays that are set (the tests set copies)."
+  - "The tests are deterministic: the numbers come from the oracle through Golden.Load, compared with Close.Equal; statistical tests use fixed seeds. Do not copy golden numbers by hand."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field (id, verify, description, recommended, test_disputes...) makes the validator refuse the report and costs a whole attempt."
+  - "Keep your reasoning short: one reply that runs out of tokens (max-tokens) loses the whole attempt (HMM-6: 25 minutes of reasoning about the last digit of a formatted number, then nothing written). If a locked test still fails after two fixes and you cannot explain it, stop and write .factory/out/coder.json with status blocked and a question that gives the test, the expected and the actual value: the pilot answers. Never re-derive floating-point or library behaviour from bits: run a one-line experiment with the other API instead (F8 against a custom format string, Math.Round...). Custom numeric format strings round a 15-digit expansion, F8 and G17 are exact."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes (exact test name, your argument, the fix you propose); never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      Score, ScoreSamples, Decode (Viterbi and Map), Predict and PredictProba reproduce every inference case of the four oracle files
+      (spherical, diag, tied, full covariances; two states of two mixture components) with both implementations, several sequences
+      and a length-1 sequence included.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm16.InferenceParityTests'
+  - id: C2
+    text: |
+      Check rejects, with ArgumentException, missing or mis-shaped Weights, Means or Covars, weights rows that do not sum to 1, negative
+      variances (spherical, diag), non-symmetric or indefinite tied and full matrices; it accepts zero variances with a warning;
+      EffectiveCovarsPrior and EffectiveCovarsWeight give the hmmlearn defaults of each covariance type and the user's values when set.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm16.ValidationTests'
+  - id: C3
+    text: |
+      Sample returns observations of the right shape whose per-state mean matches the weighted mean of the components (statistically),
+      for the four covariance types, and the first state follows StartProb.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm16.SamplingTests'
+  - id: C4
+    text: |
+      After an E-step the statistics given to DoMStep satisfy the invariants and equal the weighted sums computed in the test: PostSum sums
+      to the number of samples and each PostMixSum row sums to its PostSum entry, MN and CN are filled only when 'm' and 'c' are in Params,
+      MN starts at MeansWeight * MeansPrior; GetNFitScalarsPerParam gives the documented counts for the four types.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm16.StatisticsTests'
+  - id: C5
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/_emissions.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_gmm_hmm_new.py
+    - oracle/README.md
+    - src/HmmLearn/GmmHmm.cs
+    - src/HmmLearn/Stats.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
