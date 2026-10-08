@@ -57,7 +57,7 @@ Versions are pinned in `oracle/requirements.txt` (Python 3.12, numpy 2.5.3, scip
 | `variational_categorical.json`, `variational_gaussian_<type>.json` | `fit_cases` only, see below | `vhmm.py` |
 | `variational_base.json` | `fit_cases` of a `VariationalBaseHMM` with a stub emission (observations are the log frame probabilities, the same for the plain and the subnormalized likelihood): `init` gives `startprob_prior`, `startprob_posterior`, `transmat_prior`, `transmat_posterior` (explicit, `init_params` empty); `expected` has the fitted posteriors, `startprob`, `transmat` (normalized posteriors), `history` (the lower bounds), `n_iter_done`, `converged`, `score` (null without `s`: hmmlearn only sets `startprob_` in the `s` update) | `base.py` (`VariationalBaseHMM`) |
 | `kl.json` | `dirichlet_cases`, `normal_cases`, `multivariate_normal_cases`, `gamma_cases`, `wishart_cases` (arguments and `expected`) | `_kl_divergence.py` |
-| `stationary.json` | `cases`: `transmat`, `expected` stationary distribution | `BaseHMM.get_stationary_distribution` |
+| `stationary.json` | `cases`: `transmat`, `expected` stationary distribution (unique); `non_unique_cases`: same fields for matrices with several closed classes, where hmmlearn returns the eigenvector that LAPACK finds first | `BaseHMM.get_stationary_distribution` |
 
 ### Model files
 

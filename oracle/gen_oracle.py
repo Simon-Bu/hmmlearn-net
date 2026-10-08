@@ -994,7 +994,18 @@ def gen_stationary():
         h = hmm.CategoricalHMM(len(tm), init_params="")
         h.transmat_ = np.array(tm)
         cases.append({"name": name, "transmat": tm, "expected": h.get_stationary_distribution()})
-    write("stationary", {"module": "BaseHMM.get_stationary_distribution", "tolerance": {"rtol": RTOL, "atol": ATOL}, "cases": cases})
+    # Matrices whose stationary distribution is NOT unique: hmmlearn returns the eigenvector of the first eigenvalue of largest real part
+    # that LAPACK finds. For these four matrices it is the stationary distribution of the closed class that holds the lowest state index.
+    non_unique = []
+    for name, tm in [("identity-3-states", [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+                     ("two-absorbing-states-and-a-transient-state", [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.3, 0.3, 0.4]]),
+                     ("two-disconnected-2-cycles", [[0.0, 1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 0.0]]),
+                     ("two-ergodic-blocks", [[0.9, 0.1, 0.0, 0.0], [0.2, 0.8, 0.0, 0.0], [0.0, 0.0, 0.5, 0.5], [0.0, 0.0, 0.5, 0.5]])]:
+        h = hmm.CategoricalHMM(len(tm), init_params="")
+        h.transmat_ = np.array(tm)
+        non_unique.append({"name": name, "transmat": tm, "expected": h.get_stationary_distribution()})
+    write("stationary", {"module": "BaseHMM.get_stationary_distribution", "tolerance": {"rtol": RTOL, "atol": ATOL}, "cases": cases,
+                         "non_unique_cases": non_unique})
 
 
 if __name__ == "__main__":
