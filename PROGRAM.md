@@ -44,3 +44,12 @@ Oracle: kl, variational_categorical, variational_gaussian_spherical, variational
 20. `VariationalCategoricalHmm` (`vhmm.py`).
 21. `VariationalGaussianHmm`: initialization, likelihood, M-step (`vhmm.py`).
 22. `VariationalGaussianHmm`: lower bound and checks (`vhmm.py`).
+
+## J5: hardening of the follow-up findings
+Origin: the open follow-up issues of the merged tickets (#6, #9, #14, #26, #32, #43). Oracle: stationary_non_unique (item 26).
+23. `InternalUtils`: lengths sum without overflow, covariances without features (`_utils.py`).
+24. `Stats`: lock the null, zero-row and zero-feature contracts (`stats.py`).
+25. `Hmmc`: `ComputeLogXiSum` on zero samples (`ext/_hmmc.cpp`).
+26. `BaseHmm`: stationary distribution when it is not unique (`base.py`).
+27. `MultinomialHmm`: lock the free trial counts of `NTrials` (`hmm.py`, `_emissions.py`).
+28. `PoissonHmm`: inference rejects a wrong number of columns (`_emissions.py`).
