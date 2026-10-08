@@ -1,0 +1,159 @@
+# Ticket HMM-15. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-15
+title: PoissonHmm - hidden Markov model with Poisson emissions
+repo: software-factory/hmmlearn-net
+base: main
+phase: J3
+type: feature
+level: standard
+objective: |
+  Port PoissonHMM of hmmlearn/hmm.py and BasePoissonHMM of hmmlearn/_emissions.py to C#: HmmLearn.PoissonHmm (derived from BaseHmm)
+  and PoissonStatistics. Observations are vectors of counts; the features are independent given the state.
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py lines 945-1075 (PoissonHMM) and
+  reference/hmmlearn-0.3.3/src/hmmlearn/_emissions.py lines 372-410 (BasePoissonHMM); its tests
+  reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_poisson_hmm.py; and the numbers of oracle/golden/poisson.json (structure in
+  oracle/README.md; do not open the JSON file whole).
+scope:
+  writable:
+    - src/HmmLearn/PoissonHmm.cs
+  read_only:
+    - src/HmmLearn/BaseHmm.cs
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/AbstractHmm.Fit.cs
+    - src/HmmLearn/SufficientStatistics.cs
+    - src/HmmLearn/DecoderAlgorithm.cs
+    - src/HmmLearn/Implementation.cs
+    - src/HmmLearn/ConvergenceMonitor.cs
+    - src/HmmLearn/Hmmc.ForwardBackward.cs
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/InternalUtils.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/PoissonHmm.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public class PoissonStatistics : SufficientStatistics
+  {
+      public PoissonStatistics(int nComponents, int nFeatures);
+      public double[] Post { get; set; }  public double[,] Obs { get; set; }
+  }
+  public class PoissonHmm : BaseHmm
+  {
+      public PoissonHmm(int nComponents = 1, double startProbPrior = 1.0, double transMatPrior = 1.0, double lambdasPrior = 0.0,
+          double lambdasWeight = 0.0, DecoderAlgorithm algorithm = DecoderAlgorithm.Viterbi, int? randomState = null, int nIter = 10,
+          double tol = 1e-2, bool verbose = false, string @params = "stl", string initParams = "stl",
+          Implementation implementation = Implementation.Log);
+      public double LambdasPrior { get; set; }  public double LambdasWeight { get; set; }
+      public double[,]? Lambdas { get; set; }
+      protected override void Init(double[,] x, int[] lengths);
+      protected override void Check();
+      protected override void DoMStep(SufficientStatistics stats);
+      protected override double[,] ComputeLikelihood(double[,] x);
+      protected override double[,] ComputeLogLikelihood(double[,] x);
+      protected override SufficientStatistics InitializeSufficientStatistics();
+      protected override void AccumulateSufficientStatistics(SufficientStatistics stats, double[,] x, double[,] lattice,
+          double[,] posteriors, double[,] fwdlattice, double[,] bwdlattice);
+      protected override double[] GenerateSampleFromState(int state, Random random);
+      protected override void CheckAndSetNFeatures(double[,] x);
+      protected override IReadOnlyDictionary<char, int>? GetNFitScalarsPerParam();
+  }
+  Already merged and usable: BaseHmm (priors, Init, Check, DoMStep for start and transitions, Aic, Bic), AbstractHmm (Fit, Score, ...,
+  Sample, NeedsInit), MathNet.Numerics (SpecialFunctions.GammaLn, Gamma and Poisson distributions with a Random). Base members that an
+  override must call: base.Init(x, lengths), base.Check(), base.DoMStep(stats), base.AccumulateSufficientStatistics(...),
+  base.CheckAndSetNFeatures(x).
+
+  Semantics: the XML comments of the stubs are the specification; follow hmm.py and _emissions.py. In particular
+  - the M-step formula uses the TOTAL posterior mass n = sum over all states of Post (not the mass of the state): Lambdas[c, f] =
+    (LambdasPrior + n * Obs[c, f] / Post[c]) / (LambdasWeight + n). With the default prior 0 and 0 it is the weighted mean of the counts,
+    but with a prior the result differs from the textbook gamma posterior: the oracle case "gamma-prior-uses-total-posterior-mass"
+    checks exactly this, do not "fix" it;
+  - the log likelihood is the sum over features of count * log(rate) - rate - GammaLn(count + 1), written so that a zero count under
+    any rate costs only -rate, and the likelihood is the exponential of it (or the product of the probabilities).
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-15/, namespace HmmLearn.Tests.Acceptance.Hmm15, exactly
+  these files and classes (xunit 2 style attributes, `using Xunit` is global):
+  - InferenceParityTests.cs  -> class InferenceParityTests  (oracle inference_cases, both implementations)
+  - FitParityTests.cs        -> class FitParityTests        (oracle fit_cases, both implementations)
+  - ValidationTests.cs       -> class ValidationTests       (Check, counts, shapes)
+  - SamplingAndFitTests.cs   -> class SamplingAndFitTests   (Sample, random initialization, likelihood never decreasing during EM)
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("poisson") returns the JsonElement of oracle/golden/poisson.json.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsInts(), AsString(), AsBool(),
+    Has(name); a property is read with element.GetProperty("name").
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12). States are compared with Assert.Equal on int[].
+  Golden file oracle/golden/poisson.json: inference_cases {name, n_components, startprob, transmat, lambdas, X, lengths, expected {score,
+  log_prob, posteriors, viterbi {log_prob, states}, map {log_prob, states}}} (build the model with InitParams = "" and set StartProb,
+  TransMat and Lambdas, copies) and fit_cases {name, constructor {n_components, n_iter, tol, params and optionally lambdas_prior,
+  lambdas_weight}, init {startprob, transmat, lambdas}, X, lengths, expected {startprob, transmat, lambdas, history, n_iter_done,
+  converged, score, aic, bic}}: build the model from the constructor keys (snake_case keys map to the C# names: lambdas_prior is
+  LambdasPrior...), InitParams = "", set the three arrays from init, Fit, compare everything. Run every case with Implementation.Log and
+  Implementation.Scaling. Statistical tests use fixed seeds, large samples and wide tolerances (at least 5 standard deviations); during
+  EM, the log likelihood after each single-iteration Fit must never decrease by more than 1e-9 relative (NIter = 1, InitParams = "").
+constraints:
+  - "Only MathNet.Numerics (already referenced), the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/PoissonHmm.cs changes. Keep every signature above; every public and protected member keeps an XML summary. No abstract member may be added."
+  - "Do not mutate the arrays a caller passes in; Lambdas is replaced by a new array in the M-step and in Init."
+  - "The tests are deterministic: the numbers come from the oracle through Golden.Load, compared with Close.Equal; statistical tests use fixed seeds. Do not copy golden numbers by hand."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field (id, verify, description, recommended, test_disputes...) makes the validator refuse the report and costs a whole attempt."
+  - "Keep your reasoning short: one reply that runs out of tokens (max-tokens) loses the whole attempt (HMM-6: 25 minutes of reasoning about the last digit of a formatted number, then nothing written). If a locked test still fails after two fixes and you cannot explain it, stop and write .factory/out/coder.json with status blocked and a question that gives the test, the expected and the actual value: the pilot answers. Never re-derive floating-point or library behaviour from bits: run a one-line experiment with the other API instead (F8 against a custom format string, Math.Round...). Custom numeric format strings round a 15-digit expansion, F8 and G17 are exact."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes (exact test name, your argument, the fix you propose); never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      Score, ScoreSamples, Decode (Viterbi and Map), Predict and PredictProba reproduce every inference case of oracle/golden/poisson.json
+      with both implementations (several sequences, zero counts).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm15.InferenceParityTests'
+  - id: C2
+    text: |
+      Fit reproduces the parameters, the history, the iteration count, the convergence flag, the score, aic and bic of every fit case of
+      oracle/golden/poisson.json with both implementations (defaults, tight tolerance, rates only, and the gamma prior that uses the
+      total posterior mass).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm15.FitParityTests'
+  - id: C3
+    text: |
+      Invalid input and parameters are rejected with ArgumentException: Lambdas null, of the wrong shape, or not positive where the
+      likelihood needs it; fractional or negative counts; a different number of columns than the model has features.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm15.ValidationTests'
+  - id: C4
+    text: |
+      Sample returns counts whose per-state mean matches Lambdas (statistically); with random initialization (InitParams "stl", fixed
+      RandomState) Fit starts from valid positive rates, is reproducible, and the log likelihood never decreases from one
+      single-iteration Fit to the next on sampled data.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm15.SamplingAndFitTests'
+  - id: C5
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/_emissions.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_poisson_hmm.py
+    - oracle/README.md
+    - src/HmmLearn/PoissonHmm.cs
+    - src/HmmLearn/CategoricalHmm.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
