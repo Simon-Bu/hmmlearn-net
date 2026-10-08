@@ -35,19 +35,21 @@ public static partial class Hmmc
     /// Same sum in log space, from log lattices: logProb = LogSumExp of the last row of fwdlattice; then
     /// log_xi_sum[i,j] = LogAddExp over t = 0..n_samples-2 of
     /// (fwdlattice[t,i] + log(transmat[i,j]) + logFrameprob[t+1,j] + bwdlattice[t+1,j] - logProb), starting from -infinity
-    /// (so a single sample gives a matrix of -infinity). Result shape (nc, nc). Shape errors as in <see cref="ComputeScalingXiSum"/>.
+    /// (so a single sample gives a matrix of -infinity). With 0 samples (all inputs (0, nc)) the sum is empty too: the result is a
+    /// new (nc, nc) matrix of -infinity and the last row of fwdlattice is not read. Result shape (nc, nc). Shape errors as in <see cref="ComputeScalingXiSum"/>.
     /// </summary>
     public static double[,] ComputeLogXiSum(double[,] fwdlattice, double[,] transmat, double[,] bwdlattice, double[,] logFrameprob)
     {
         var ns = logFrameprob.GetLength(0);
         var nc = logFrameprob.GetLength(1);
         CheckXiShapes(fwdlattice, transmat, bwdlattice, ns, nc);
-        var logTransmat = LogMatrix(transmat);
-        var logProb = LogSumExp(MemoryMarshal.CreateReadOnlySpan(ref fwdlattice[ns - 1, 0], nc));
         var logXiSum = new double[nc, nc];
         for (var i = 0; i < nc; i++)
             for (var j = 0; j < nc; j++)
                 logXiSum[i, j] = double.NegativeInfinity;
+        if (ns == 0) return logXiSum;
+        var logTransmat = LogMatrix(transmat);
+        var logProb = LogSumExp(MemoryMarshal.CreateReadOnlySpan(ref fwdlattice[ns - 1, 0], nc));
         for (var t = 0; t < ns - 1; t++)
         {
             for (var i = 0; i < nc; i++)
