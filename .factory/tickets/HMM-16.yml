@@ -165,7 +165,7 @@ roles:
 waivers:
   reviewer_same_family: "POC local-only decided by Simon"
 review:
-  max_rounds: 2
+  max_rounds: 3
 context:
   files:
     - reference/hmmlearn-0.3.3/src/hmmlearn/hmm.py
