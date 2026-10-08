@@ -349,8 +349,8 @@ public class InitTests
         }, warnings);
     }
 
-    /// <summary>The free-scalar count only covers the letters of Params: with params "s" a one-point fit (1 < 2) warns, and a
-    /// two-point fit (2 = 2) does not.</summary>
+    /// <summary>The free-scalar count only covers the letters of Params: with params "s" (2 free scalars) one data value (1 < 2) warns,
+    /// and two data values (2 = 2) do not; the data have one column, so the size is the number of rows.</summary>
     [Fact]
     public void init_counts_the_free_parameters_of_the_letters_in_params_only()
     {
@@ -358,7 +358,7 @@ public class InitTests
         var warnings = new List<string>();
         var smallModel = Model(nc, null, null, "s", "", 42, UnitVector(nc), UnitVector(nc), UnitMatrix(nc), UnitMatrix(nc));
         smallModel.Warning += warnings.Add;
-        var small = Data(1, nc);
+        var small = Data(1, 1);
         smallModel.RunInit(small, new[] { 1 });
         var smallSize = small.GetLength(0) * small.GetLength(1);
         Assert.Equal(new[]
@@ -369,7 +369,7 @@ public class InitTests
         var enoughWarnings = new List<string>();
         var enoughModel = Model(nc, null, null, "s", "", 42, UnitVector(nc), UnitVector(nc), UnitMatrix(nc), UnitMatrix(nc));
         enoughModel.Warning += enoughWarnings.Add;
-        enoughModel.RunInit(Data(2, nc), new[] { 1, 1 });
+        enoughModel.RunInit(Data(2, 1), new[] { 1, 1 });
         Assert.Empty(enoughWarnings);
     }
 
