@@ -430,7 +430,7 @@ public class MStepTests
         };
         var dof = new double[scale.GetLength(0)];
 
-        if (type is CovarianceType.Full or CovarianceType.Tied)
+        if (type == CovarianceType.Tied)
         {
             for (var c = 0; c < dof.Length; c++)
             {
@@ -448,6 +448,19 @@ public class MStepTests
                     for (var j = 0; j < NFeatures; j++)
                         scale[c, i, j] += scalePrior[c, i, j];
                 dof[c] = dofPrior[c] + mass;
+            }
+        }
+        else if (type == CovarianceType.Full)
+        {
+            // One matrix and one dof per state: the statistics of the state only.
+            for (var c = 0; c < NComponents; c++)
+            {
+                for (var i = 0; i < NFeatures; i++)
+                    for (var j = 0; j < NFeatures; j++)
+                        scale[c, i, j] = scalePrior[c, i, j] + stats.ObsObsT![c, i, j]
+                            + betaPrior[c] * meansPrior[c, i] * meansPrior[c, j]
+                            - beta[c] * means[c, i] * means[c, j];
+                dof[c] = dofPrior[c] + stats.Post[c];
             }
         }
         else if (type == CovarianceType.Diag)
