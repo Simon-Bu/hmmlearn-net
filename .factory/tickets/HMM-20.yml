@@ -1,0 +1,172 @@
+# Ticket HMM-20. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-20
+title: VariationalCategoricalHmm - categorical emissions learned by Variational Bayes
+repo: software-factory/hmmlearn-net
+base: main
+phase: J4
+type: feature
+level: standard
+objective: |
+  Port VariationalCategoricalHMM of hmmlearn/vhmm.py to C#: the class HmmLearn.VariationalCategoricalHmm (derived from VariationalBaseHmm)
+  with the Dirichlet prior and posterior of each emission row, their random initialization and validation, the subnormalized emission
+  log likelihood of the E-step, the M-step and the lower bound. It reuses the categorical helpers of CategoricalEmission.
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/vhmm.py lines 19-231 (VariationalCategoricalHMM) and reference/hmmlearn-0.3.3/src/hmmlearn/_emissions.py
+  lines 30-110 (BaseCategoricalHMM); its tests reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_variational_categorical.py; and the numbers of
+  oracle/golden/variational_categorical.json (structure in oracle/README.md; do not open the JSON files whole, they are large).
+scope:
+  writable:
+    - src/HmmLearn/VariationalCategoricalHmm.cs
+  read_only:
+    - src/HmmLearn/VariationalBaseHmm.cs
+    - src/HmmLearn/CategoricalEmission.cs
+    - src/HmmLearn/CategoricalHmm.cs
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/AbstractHmm.Fit.cs
+    - src/HmmLearn/SufficientStatistics.cs
+    - src/HmmLearn/KlDivergence.cs
+    - src/HmmLearn/DecoderAlgorithm.cs
+    - src/HmmLearn/Implementation.cs
+    - src/HmmLearn/ConvergenceMonitor.cs
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/InternalUtils.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/VariationalCategoricalHmm.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public class VariationalCategoricalHmm : VariationalBaseHmm
+  {
+      public VariationalCategoricalHmm(int nComponents = 1, double? startProbPrior = null, double? transMatPrior = null,
+          double? emissionProbPrior = null, int? nFeatures = null, DecoderAlgorithm algorithm = DecoderAlgorithm.Viterbi,
+          int? randomState = null, int nIter = 100, double tol = 1e-6, bool verbose = false, string @params = "ste",
+          string initParams = "ste", Implementation implementation = Implementation.Log);   // sets EmissionProbPrior and NFeatures after the base constructor
+      public double? EmissionProbPrior { get; set; }             // scalar of the default prior (null: 1 / NFeatures)
+      public double[,]? EmissionProbPriorValues { get; set; }    // hmmlearn's emissionprob_prior_
+      public double[,]? EmissionProbPosterior { get; set; }      // emissionprob_posterior_
+      public double[,]? EmissionProb { get; set; }               // emissionprob_: the normalized posterior, set by the M-step ('e')
+      protected double[,]? EmissionProbLogSubnorm { get; set; }
+      protected override void Init(double[,] x, int[] lengths);
+      protected override void Check();
+      protected override void EstepBegin();
+      protected override double[,] ComputeSubnormLogLikelihood(double[,] x);
+      protected override void DoMStep(SufficientStatistics stats);
+      protected override double ComputeLowerBound(double currLogProb);
+      protected override double[,] ComputeLikelihood(double[,] x);
+      protected override double[,] ComputeLogLikelihood(double[,] x);
+      protected override SufficientStatistics InitializeSufficientStatistics();
+      protected override void AccumulateSufficientStatistics(SufficientStatistics stats, double[,] x, double[,] lattice,
+          double[,] posteriors, double[,] fwdlattice, double[,] bwdlattice);
+      protected override double[] GenerateSampleFromState(int state, Random random);
+      protected override void CheckAndSetNFeatures(double[,] x);
+      protected override IReadOnlyDictionary<char, int>? GetNFitScalarsPerParam();
+  }
+  Already merged and usable: VariationalBaseHmm (priors and posteriors of the start and transitions, Init, Check, EstepBegin, DoMStep,
+  ComputeLowerBound, the Fit* hooks), AbstractHmm (Fit, Score, ScoreSamples, Decode, Predict, PredictProba, Sample, NeedsInit,
+  RaiseWarning, CheckAndSetNFeatures), CategoricalEmission (CheckAndSetNFeatures, Likelihood, AccumulateObs, GenerateSample,
+  NFitScalars), CategoricalStatistics (Obs), KlDivergence.KlDirichlet, MathNet.Numerics (SpecialFunctions.DiGamma, Dirichlet.Sample).
+  Base members that an override must call: base.Init(x, lengths), base.Check(), base.EstepBegin(), base.DoMStep(stats),
+  base.ComputeLowerBound(currLogProb), base.AccumulateSufficientStatistics(...).
+
+  Semantics: the XML comments of the stubs are the specification; follow vhmm.py. In particular
+  - the E-step emission term is the SUBNORMALIZED one (EmissionProbLogSubnorm, from digamma), while Score, Decode, Predict and Sample
+    use EmissionProb (the normalized posterior): after Fit with Params containing 'e' the two differ, and EmissionProb stays null if
+    'e' was never updated (scoring such a model is not defined: do not test it);
+  - the emission row of the posterior at initialization is scaled by (sum of lengths) / NComponents; the random initialization of the
+    start and transition posteriors is done by the base class;
+  - the emission prior value is EmissionProbPrior when given, else 1 / NFeatures (NFeatures is known after the base Init).
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-20/, namespace HmmLearn.Tests.Acceptance.Hmm20, exactly
+  these files and classes (xunit 2, `using Xunit` is global):
+  - FitParityTests.cs        -> class FitParityTests        (every fit case of oracle/golden/variational_categorical.json, both implementations)
+  - InitAndCheckTests.cs     -> class InitAndCheckTests     (Init, Check, NFeatures, priors)
+  - EmissionTests.cs         -> class EmissionTests         (E-step emission term, M-step, lower bound, scoring and sampling after Fit)
+  - BehaviourTests.cs        -> class BehaviourTests        (monotone lower bound, length-1 sequences, invalid symbols, Beal-style data)
+  The tests that need protected members define `class ExposedModel : VariationalCategoricalHmm` with public wrappers (for instance
+  `public void RunEstepBegin() => EstepBegin();`, `public double[,]? LogSubnorm => EmissionProbLogSubnorm;`,
+  `public double[,] SubnormLogLikelihood(double[,] x) => ComputeSubnormLogLikelihood(x);`, `public double Bound(double lp) => ComputeLowerBound(lp);`).
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("variational_categorical") returns the JsonElement of oracle/golden/variational_categorical.json.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsInts(), AsString(), AsBool(),
+    Has(name); a property is read with element.GetProperty("name"). X is a (n, 1) matrix of symbols: use AsMatrix().
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12).
+  Golden file oracle/golden/variational_categorical.json fit_cases: each has name, constructor {n_components, n_features, params, n_iter,
+  tol}, init {startprob_prior, startprob_posterior, transmat_prior, transmat_posterior, emissionprob_prior, emissionprob_posterior}
+  (the explicit starting parameters: build the model with InitParams = "" and set StartProbPriorValues, StartProbPosterior,
+  TransMatPriorValues, TransMatPosterior, EmissionProbPriorValues, EmissionProbPosterior), X (n, 1), lengths and expected {the six
+  arrays after Fit, startprob, transmat, emissionprob (null if never set), history (Monitor.History), n_iter_done, converged,
+  score (null when it is not available)}. Run every case with Implementation.Log and Implementation.Scaling; a null expected value
+  means "do not compare" (and for emissionprob, that EmissionProb is null).
+  The other tests use structural checks, values computed in the test with MathNet.Numerics.SpecialFunctions.DiGamma and
+  KlDivergence.KlDirichlet (no hand-computed numbers), fixed seeds and wide tolerances. During EM the lower bound (Monitor.History)
+  must never decrease by more than 1e-9 relative from one iteration to the next on data sampled from a small categorical model.
+constraints:
+  - "Only MathNet.Numerics (already referenced), the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/VariationalCategoricalHmm.cs changes. Keep every signature above; every public and protected member keeps an XML summary. No member may be added to a base class."
+  - "Do not mutate the arrays a caller passes in; the posteriors and EmissionProb are replaced by new arrays in the M-step and in Init."
+  - "The tests are deterministic: the numbers come from the oracle through Golden.Load, compared with Close.Equal; statistical and initialization tests use fixed seeds and structural checks. Do not copy golden numbers by hand."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field (id, verify, description, recommended, test_disputes...) makes the validator refuse the report and costs a whole attempt."
+  - "Keep your reasoning short: one reply that runs out of tokens (max-tokens) loses the whole attempt (HMM-6: 25 minutes of reasoning about the last digit of a formatted number, then nothing written). If a locked test still fails after two fixes and you cannot explain it, stop and write .factory/out/coder.json with status blocked and a question that gives the test, the expected and the actual value: the pilot answers. Never re-derive floating-point or library behaviour from bits: run a one-line experiment with the other API instead (F8 against a custom format string, Math.Round...). Custom numeric format strings round a 15-digit expansion, F8 and G17 are exact."
+  - "Statistical assertions (recovery of parameters, agreement between covariance types, a fit that finds the true model) must hold for ANY correct implementation, hmmlearn included: start such a fit from explicit parameters near the truth (InitParams \"\") with wide tolerances, never from the random initialization, which can end in a poor local optimum or in a NaN row (HMM-17). From the random initialization assert only validity (shapes, rows summing to 1, finite values) and the monotone lower bound."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes: each item has exactly two fields, test (the exact test name) and argument (your argument, with the fix you propose written inside it); any other field, such as fix, makes the validator refuse the whole report and costs an attempt (HMM-16). Never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      Fit with explicit initial parameters reproduces the six prior and posterior arrays, startprob, transmat, emissionprob, history,
+      n_iter_done, converged and score of every fit case of oracle/golden/variational_categorical.json with both implementations
+      (all of s, t and e, e with t, s with t, a few iterations, sequences of length 1).
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm20.FitParityTests'
+  - id: C2
+    text: |
+      Init fills the emission prior from the scalar prior or 1 / NFeatures and draws an emission posterior with rows summing to
+      (sum of lengths) / NComponents, reproducibly for a given RandomState and only when 'e' must be initialized; Check rejects
+      emission arrays that are null or of different shapes or not (NComponents x NFeatures) with ArgumentException; NFeatures is
+      inferred from the largest symbol or respected when given; symbols that are fractional, negative or above NFeatures - 1 are
+      rejected; the scalar priors 1, 2 and 3 given to the constructor end up in the three prior arrays.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm20.InitAndCheckTests'
+  - id: C3
+    text: |
+      EstepBegin computes the emission log subnormalization with digamma, the subnormalized log likelihood of a sample is the entry of
+      the symbol, DoMStep with 'e' sets the posterior to prior + Obs and EmissionProb to its row-normalization (and leaves them alone
+      without 'e'), ComputeLowerBound adds the emission KL terms to the base bound, and Score, Decode and Sample use EmissionProb after Fit.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm20.EmissionTests'
+  - id: C4
+    text: |
+      The lower bound never decreases during Fit (single-iteration fits on data sampled from a three-state cyclic model, both
+      implementations, random initialization with a fixed seed), sequences of length 1 are accepted, and both implementations agree.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm20.BehaviourTests'
+  - id: C5
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/vhmm.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/_emissions.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_variational_categorical.py
+    - oracle/README.md
+    - src/HmmLearn/VariationalCategoricalHmm.cs
+    - src/HmmLearn/VariationalBaseHmm.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
