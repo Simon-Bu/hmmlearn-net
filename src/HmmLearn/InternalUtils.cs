@@ -59,7 +59,8 @@ public static class InternalUtils
     /// <summary>
     /// Splits the rows of <paramref name="x"/> (n_samples, n_features) into consecutive sequences of the given lengths; each
     /// element of the result is a new matrix with the rows of one sequence. Null lengths: a list holding <paramref name="x"/> itself.
-    /// Lengths that are negative or do not sum to the number of rows throw <see cref="ArgumentException"/>.
+    /// Lengths that are negative or do not sum to the number of rows throw <see cref="ArgumentException"/>; the sum is computed
+    /// in 64 bits, so a sum that would wrap around in 32 bits is still rejected.
     /// </summary>
     public static List<double[,]> SplitXLengths(double[,] x, int[]? lengths)
     {
@@ -67,7 +68,7 @@ public static class InternalUtils
             return new List<double[,]> { x };
         var nRows = x.GetLength(0);
         var nColumns = x.GetLength(1);
-        var total = 0;
+        long total = 0;
         for (var i = 0; i < lengths.Length; i++)
         {
             if (lengths[i] < 0)
@@ -96,6 +97,8 @@ public static class InternalUtils
     /// Shapes: spherical (nComponents, 1, 1), diag (nComponents, 1, nf), full (nComponents, nf, nf), tied (1, nf, nf), otherwise
     /// ArgumentException. Spherical and diag: every variance must be positive. Tied and full: every matrix must be symmetric
     /// (|a - b| &lt;= 1e-8 + 1e-5 * |b| between a[i,j] and its transpose b = a[j,i]) and positive definite (every eigenvalue &gt; 0).
+    /// A matrix without features (nf = 0) is vacuously symmetric and positive definite: tied (1, 0, 0) and full (nComponents, 0, 0)
+    /// are accepted.
     /// </summary>
     public static void ValidateCovars(double[,,] covars, CovarianceType covarianceType, int nComponents)
     {
@@ -190,6 +193,8 @@ public static class InternalUtils
     private static void CheckMatrix(double[,,] covars, int k)
     {
         var n = covars.GetLength(1);
+        if (n == 0)
+            return; // vacuously symmetric and positive definite
         for (var i = 0; i < n; i++)
             for (var j = i + 1; j < n; j++)
             {
