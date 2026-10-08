@@ -1,0 +1,195 @@
+# Ticket HMM-21. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-21
+title: VariationalGaussianHmm - parameters, initialization, E-step term, lower bound, scoring and sampling
+repo: software-factory/hmmlearn-net
+base: main
+phase: J4
+type: feature
+level: standard
+objective: |
+  Port VariationalGaussianHMM of hmmlearn/vhmm.py to C#, everything except the M-step of the means and covariances (next ticket): the class
+  HmmLearn.VariationalGaussianHmm (derived from VariationalBaseHmm) with the Normal-Wishart priors and posteriors of the four covariance
+  types, their initialization from k-means, their validation, the subnormalized emission log likelihood of the E-step, the variational lower
+  bound, scoring, decoding and sampling. With params that contain only "s" and "t" the model already fits (the means and covariances stay
+  at their initial posteriors); "m" and "c" are updated by the next ticket.
+  Reference: reference/hmmlearn-0.3.3/src/hmmlearn/vhmm.py lines 233-695 and 786-844 (VariationalGaussianHMM: __init__, covars_, means_,
+  _init, _get_n_fit_scalars_per_param, _check, _compute_subnorm_log_likelihood, _compute_lower_bound, the two _needs_ methods) and
+  reference/hmmlearn-0.3.3/src/hmmlearn/_emissions.py lines 112-182 (BaseGaussianHMM); its tests
+  reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_variational_gaussian.py; and the numbers of oracle/golden/variational_gaussian_<type>.json
+  (spherical, diag, tied and full; structure in oracle/README.md; do not open the JSON files whole, they are large).
+scope:
+  writable:
+    - src/HmmLearn/VariationalGaussianHmm.cs
+  read_only:
+    - src/HmmLearn/VariationalBaseHmm.cs
+    - src/HmmLearn/GaussianEmission.cs
+    - src/HmmLearn/GaussianHmm.cs
+    - src/HmmLearn/GaussianHmm.Learning.cs
+    - src/HmmLearn/KMeans.cs
+    - src/HmmLearn/KlDivergence.cs
+    - src/HmmLearn/Stats.cs
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/AbstractHmm.Fit.cs
+    - src/HmmLearn/SufficientStatistics.cs
+    - src/HmmLearn/CovarianceType.cs
+    - src/HmmLearn/DecoderAlgorithm.cs
+    - src/HmmLearn/Implementation.cs
+    - src/HmmLearn/ConvergenceMonitor.cs
+    - src/HmmLearn/Utils.cs
+    - src/HmmLearn/InternalUtils.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/VariationalGaussianHmm.cs (committed as stubs that throw NotImplementedException; the coder writes the bodies)
+  namespace HmmLearn;
+  public partial class VariationalGaussianHmm : VariationalBaseHmm
+  {
+      public VariationalGaussianHmm(int nComponents = 1, CovarianceType covarianceType = CovarianceType.Full, double? startProbPrior = null,
+          double? transMatPrior = null, double[,]? meansPrior = null, double[]? betaPrior = null, double[]? dofPrior = null,
+          double[,,]? scalePrior = null, DecoderAlgorithm algorithm = DecoderAlgorithm.Viterbi, int? randomState = null, int nIter = 100,
+          double tol = 1e-6, bool verbose = false, string @params = "stmc", string initParams = "stmc",
+          Implementation implementation = Implementation.Log);          // stores the arguments in the properties below
+      public CovarianceType CovarianceType { get; set; }
+      public double[,]? MeansPrior { get; set; }  public double[]? BetaPrior { get; set; }  public double[]? DofPrior { get; set; }
+      public double[,,]? ScalePrior { get; set; }                       // constructor values, used by Init when set
+      public double[,]? MeansPriorValues { get; set; }  public double[,]? MeansPosterior { get; set; }
+      public double[]? BetaPriorValues { get; set; }    public double[]? BetaPosterior { get; set; }
+      public double[]? DofPriorValues { get; set; }     public double[]? DofPosterior { get; set; }
+      public double[,,]? ScalePriorValues { get; set; } public double[,,]? ScalePosterior { get; set; }
+      public double[,,]? Covars { get; set; }                           // setter validates (InternalUtils.ValidateCovars) and copies
+      public double[,,] FullCovars { get; }
+      public double[,]? Means { get; }                                  // = MeansPosterior
+      protected override void Init(double[,] x, int[] lengths);
+      protected override void Check();
+      protected override IReadOnlyDictionary<char, int>? GetNFitScalarsPerParam();
+      protected override double[,] ComputeSubnormLogLikelihood(double[,] x);
+      protected override double ComputeLowerBound(double currLogProb);
+      protected override double[,] ComputeLogLikelihood(double[,] x);
+      protected override SufficientStatistics InitializeSufficientStatistics();
+      protected override void AccumulateSufficientStatistics(SufficientStatistics stats, double[,] x, double[,] lattice,
+          double[,] posteriors, double[,] fwdlattice, double[,] bwdlattice);
+      protected virtual bool NeedsStatisticsForMeans { get; }
+      protected virtual bool NeedsStatisticsForCovars { get; }
+      protected override double[] GenerateSampleFromState(int state, Random random);
+  }
+  // src/HmmLearn/VariationalGaussianHmm.Learning.cs does NOT exist yet: the M-step of "m" and "c" is the next ticket, do not create it.
+  Already merged and usable: VariationalBaseHmm (priors and posteriors of the start and transitions, EstepBegin, the Fit* hooks, DoMStep
+  and ComputeLowerBound of the start and transitions), AbstractHmm (Fit, Score, ScoreSamples, Decode, Predict, PredictProba, Sample,
+  NeedsInit, RaiseWarning, CheckAndSetNFeatures), GaussianStatistics and GaussianEmission (Accumulate, GenerateSample, NFitScalars is NOT
+  usable as is: the variational counts differ), KMeans.Fit, KlDivergence (KlMultivariateNormalDistribution, KlWishartDistribution),
+  Stats.LogMultivariateNormalDensity, Utils.FillCovars, InternalUtils (ValidateCovars, DistributeCovarMatrixToMatchCovarianceType, LogDet),
+  MathNet.Numerics (SpecialFunctions.DiGamma, Matrix inverse).
+  Base members that an override must call: base.Init(x, lengths), base.Check(), base.ComputeLowerBound(currLogProb),
+  base.AccumulateSufficientStatistics(...).
+
+  Semantics: the XML comments of the stubs are the specification; follow vhmm.py. In particular
+  - all arrays use the compact uniform shapes: spherical (nc, 1, 1), diag (nc, 1, nf), full (nc, nf, nf), tied (1, nf, nf) for the scale
+    arrays and the covariances; dof arrays have nc numbers (one for tied); the oracle files give them in these shapes;
+  - the spherical initial covariance is the mean of ALL entries of the data covariance matrix (that is what
+    InternalUtils.DistributeCovarMatrixToMatchCovarianceType does); the scale posterior of a spherical state is its variance times its dof;
+  - the E-step term uses the POSTERIOR parameters (digamma of the dof, 1 / beta, the inverse scale), Score and Sample use Means and Covars;
+  - with Params containing 'c' but not 'm' the statistics of the means are still accumulated (that is what NeedsStatisticsForMeans says);
+  - the lower bound of a tied model counts the Wishart divergence once (first state only) and the dof of every state is the one tied dof.
+
+  Acceptance tests (written by the tests agent): folder tests/acceptance/HMM-21/, namespace HmmLearn.Tests.Acceptance.Hmm21, exactly
+  these files and classes (xunit 2, `using Xunit` is global):
+  - StartAndTransitionsParityTests.cs  -> class StartAndTransitionsParityTests (the "start-and-transitions-only" fit case of each of the 4 oracle files, both implementations)
+  - InitAndCheckTests.cs               -> class InitAndCheckTests               (Init of the 4 covariance types, Check, constructor priors, NFeatures)
+  - EmissionTermTests.cs               -> class EmissionTermTests               (ComputeSubnormLogLikelihood and ComputeLowerBound: shapes, invariants, relations between the types)
+  - ModelTests.cs                      -> class ModelTests                      (GetNFitScalarsPerParam, Score, Decode, Sample, FullCovars, Covars setter)
+  The tests that need protected members define `class ExposedModel : VariationalGaussianHmm` with public wrappers (for instance
+  `public double[,] SubnormLogLikelihood(double[,] x) => ComputeSubnormLogLikelihood(x);`, `public double Bound(double lp) => ComputeLowerBound(lp);`,
+  `public IReadOnlyDictionary<char, int>? Scalars() => GetNFitScalarsPerParam();`); it forwards the constructor arguments.
+
+  Test support, already committed and read-only (tests/HmmLearn.Tests/Support/Golden.cs, namespace HmmLearn.Tests.Support):
+  - Golden.Load("variational_gaussian_full") (and _spherical, _diag, _tied) returns the JsonElement of the file.
+  - extension methods of GoldenJson on JsonElement: Items(), AsDouble(), AsVector(), AsMatrix(), AsTensor3(), AsInts(), AsString(),
+    AsBool(), Has(name); a property is read with element.GetProperty("name").
+  - Close.Equal(double expected, double actual, string what) and Close.Equal(Array expected, Array actual, string what): the oracle
+    tolerance (relative 1e-6, absolute 1e-12).
+  Golden file oracle/golden/variational_gaussian_<type>.json fit_cases: each has name, constructor {n_components, covariance_type, params,
+  n_iter, tol}, init {startprob_prior, startprob_posterior, transmat_prior, transmat_posterior, means_prior, means_posterior, beta_prior,
+  beta_posterior, dof_prior, dof_posterior, scale_prior, scale_posterior, covars} (the explicit starting parameters: build the model with
+  InitParams = "" and set StartProbPriorValues, StartProbPosterior, TransMatPriorValues, TransMatPosterior, MeansPriorValues, MeansPosterior,
+  BetaPriorValues, BetaPosterior, DofPriorValues, DofPosterior, ScalePriorValues, ScalePosterior and Covars), X, lengths and expected
+  {startprob_posterior, transmat_posterior, means_posterior, beta_posterior, dof_posterior, scale_posterior, covars, startprob, transmat,
+  history (Monitor.History), n_iter_done, converged, score}. Only the case named "start-and-transitions-only" is run in this ticket: all
+  its arrays except the start and transition ones must come out unchanged (the fit does not touch them). Run it with Implementation.Log and
+  Implementation.Scaling; a null expected value means "do not compare".
+  The other tests use structural checks, values computed in the test (for instance with MathNet.Numerics.SpecialFunctions.DiGamma for a
+  one-feature model, where the formulas of vhmm.py reduce to scalars) and the invariants listed in the criteria; fixed seeds.
+constraints:
+  - "Only MathNet.Numerics (already referenced), the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/VariationalGaussianHmm.cs changes. Keep every signature above; every public and protected member keeps an XML summary. No member may be added to a base class and no file may be added in src/."
+  - "Do not mutate the arrays a caller passes in; every posterior and covariance array is replaced by a new array."
+  - "The tests are deterministic: the numbers come from the oracle through Golden.Load, compared with Close.Equal; initialization tests use fixed seeds and structural checks. Do not copy golden numbers by hand."
+  - "Each test class compiles against the stubs and FAILS with NotImplementedException from them (never a compile error, never 'no test matches'): run each verify command before you finish."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "Numbers come from the oracle, not from your head. Hand-written cases are for exceptions, shapes, null and in-place behaviour, invariants (a row sums to 1, a result is symmetric) and at most three exact numeric assertions on trivial inputs (zeros, ones, powers of two, an identity). Never assert exact equality to 0 or to -infinity for a result that rounding could change (a matrix that is only mathematically singular, a difference of nearly equal numbers). A wrong expectation in a locked test costs a whole round."
+  - "An expected value that a test computes from a formula takes every operand from the test's own inputs by code (Math.Max(a, b), values.Sum(), a loop), never retyped by hand: the wrong one of two retyped numbers is the usual way a locked test turns out wrong (HMM-4: the maximum of (-1000, -999) written as -1000)."
+  - "The report .factory/out/tests.json has exactly these fields and no other: version, ticket, role, round, status, summary, files, coverage (items: criterion C<n> and tests), assumptions (items: text and tests), questions (items: id Q<n>, question, blocking, and optionally context, options, recommendation, restates). An invented field (id, verify, description, recommended, test_disputes...) makes the validator refuse the report and costs a whole attempt."
+  - "Keep your reasoning short: one reply that runs out of tokens (max-tokens) loses the whole attempt (HMM-6: 25 minutes of reasoning about the last digit of a formatted number, then nothing written). If a locked test still fails after two fixes and you cannot explain it, stop and write .factory/out/coder.json with status blocked and a question that gives the test, the expected and the actual value: the pilot answers. Never re-derive floating-point or library behaviour from bits: run a one-line experiment with the other API instead (F8 against a custom format string, Math.Round...). Custom numeric format strings round a 15-digit expansion, F8 and G17 are exact."
+  - "Statistical assertions (recovery of parameters, agreement between covariance types, a fit that finds the true model) must hold for ANY correct implementation, hmmlearn included: start such a fit from explicit parameters near the truth (InitParams \"\") with wide tolerances, never from the random initialization, which can end in a poor local optimum or in a NaN row (HMM-17). From the random initialization assert only validity (shapes, rows summing to 1, finite values) and the monotone lower bound."
+  - "Do not re-implement an algorithm inside a test (Viterbi, forward-backward, a sampler, a normal density): a test-side copy is the likeliest source of a wrong locked test (HMM-20: the Viterbi helper forgot a transition term and updated its state in place, and the coder had to dispute it). Take the expected number from the oracle, or check a property that needs no algorithm (a row sums to 1, Score equals the sum of the per-sequence scores, Decode returns states in range, the log probability of Decode is at most the score)."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "A locked test that seems wrong is reported ONLY in test_disputes: each item has exactly two fields, test (the exact test name) and argument (your argument, with the fix you propose written inside it); any other field, such as fix, makes the validator refuse the whole report and costs an attempt (HMM-16). Never invent remark ids in replies, which answers the review remarks only (none in round 1)."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      Fit of the "start-and-transitions-only" case of each of the four oracle files (spherical, diag, tied, full) reproduces startprob_posterior,
+      transmat_posterior, startprob, transmat, history (the lower bound of every iteration, which includes the emission terms), n_iter_done,
+      converged and score with both implementations, and leaves the means, beta, dof, scale and covars arrays equal to their initial values.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm21.StartAndTransitionsParityTests'
+  - id: C2
+    text: |
+      Init, for each covariance type, on sampled two-feature data: MeansPosterior are k-means centers inside the data range, BetaPosterior
+      and DofPosterior (non-tied) are the cluster sizes (summing to the number of samples), the tied dof is the number of samples, the priors take
+      their defaults (means prior = data mean, beta 1, dof nf, scale 1e-3 in the shape of the type) or the constructor values, Covars and
+      ScalePosterior have the compact shape of the type with ScalePosterior = covariance times dof; the same RandomState reproduces the result and
+      InitParams without 'm' or 'c' leaves the explicit arrays alone. Check rejects (ArgumentException) arrays that are null or have the wrong
+      shape or length, and an undefined covariance type; NFeatures is set by Fit.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm21.InitAndCheckTests'
+  - id: C3
+    text: |
+      ComputeSubnormLogLikelihood has shape (n_samples, n_components), is finite, is the same for the spherical, diag, full and tied
+      parameterizations of one and the same isotropic model, equals the closed form of vhmm.py for a one-feature model computed in the test with
+      MathNet.Numerics DiGamma, and gets larger when a sample moves toward a posterior mean; ComputeLowerBound equals the base lower bound minus
+      non-negative KL terms for the emissions and the bound of a model whose posteriors equal its priors adds no emission term.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm21.EmissionTermTests'
+  - id: C4
+    text: |
+      GetNFitScalarsPerParam gives the documented counts for each type, Score, Decode, Predict and PredictProba work on a model whose
+      Means and Covars are set explicitly (Score equals the sum of the log likelihoods given by Stats.LogMultivariateNormalDensity combined with
+      the forward pass for a one-state model), Sample returns states and observations of the right shapes whose empirical mean and covariance
+      are close to Means and Covars for a one-state model (fixed seed, wide tolerance), the Covars setter validates and copies, and FullCovars
+      has the full shape for every type.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm21.ModelTests'
+  - id: C5
+    text: "The code stays readable: short methods, no dead code, the XML summaries match the behaviour."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  tests: qwen-q4-long
+  coder: qwen-pi
+  reviewer: qwen-q4-long
+waivers:
+  reviewer_same_family: "POC local-only decided by Simon"
+review:
+  max_rounds: 1
+context:
+  files:
+    - reference/hmmlearn-0.3.3/src/hmmlearn/vhmm.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/_emissions.py
+    - reference/hmmlearn-0.3.3/src/hmmlearn/tests/test_variational_gaussian.py
+    - oracle/README.md
+    - src/HmmLearn/VariationalGaussianHmm.cs
+    - src/HmmLearn/VariationalBaseHmm.cs
+    - tests/HmmLearn.Tests/Support/Golden.cs
