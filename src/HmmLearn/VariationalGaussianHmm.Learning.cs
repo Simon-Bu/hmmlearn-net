@@ -26,7 +26,175 @@ public partial class VariationalGaussianHmm
     protected override void DoMStep(SufficientStatistics stats)
     {
         base.DoMStep(stats);
-        if (Params.Contains('m') || Params.Contains('c'))
-            throw new NotImplementedException();
+        var gs = (GaussianStatistics)stats;
+        if (Params.Contains('m'))
+            UpdateMeans(gs);
+        if (Params.Contains('c'))
+            UpdateCovariances(gs);
+    }
+
+    /// <summary>The means update: BetaPosterior = BetaPriorValues + Post; MeansPosterior = (BetaPriorValues * MeansPriorValues + Obs) / BetaPosterior, in new arrays.</summary>
+    private void UpdateMeans(GaussianStatistics gs)
+    {
+        var nc = NComponents;
+        var nf = gs.Obs.GetLength(1);
+        var betaPrior = BetaPriorValues!;
+        var meansPrior = MeansPriorValues!;
+        var betaPosterior = new double[nc];
+        var meansPosterior = new double[nc, nf];
+        for (var c = 0; c < nc; c++)
+        {
+            betaPosterior[c] = betaPrior[c] + gs.Post[c];
+            for (var f = 0; f < nf; f++)
+                meansPosterior[c, f] = (betaPrior[c] * meansPrior[c, f] + gs.Obs[c, f]) / betaPosterior[c];
+        }
+        BetaPosterior = betaPosterior;
+        MeansPosterior = meansPosterior;
+    }
+
+    /// <summary>Dispatches the covariance update to the per-type helper.</summary>
+    private void UpdateCovariances(GaussianStatistics gs)
+    {
+        switch (CovarianceType)
+        {
+            case CovarianceType.Full:
+                UpdateFullCovariances(gs);
+                break;
+            case CovarianceType.Tied:
+                UpdateTiedCovariances(gs);
+                break;
+            case CovarianceType.Diag:
+                UpdateDiagCovariances(gs);
+                break;
+            case CovarianceType.Spherical:
+                UpdateSphericalCovariances(gs);
+                break;
+        }
+    }
+
+    /// <summary>Full: per-state dof = dof_prior + post, scale = scale_prior + obs*obs.T + beta_prior * outer(means_prior) - beta_posterior * outer(means_posterior), covars = scale / dof.</summary>
+    private void UpdateFullCovariances(GaussianStatistics gs)
+    {
+        var nc = NComponents;
+        var nf = gs.Obs.GetLength(1);
+        var dofPrior = DofPriorValues!;
+        var scalePrior = ScalePriorValues!;
+        var betaPrior = BetaPriorValues!;
+        var meansPrior = MeansPriorValues!;
+        var betaPosterior = BetaPosterior!;
+        var meansPosterior = MeansPosterior!;
+        var dofPosterior = new double[nc];
+        var scalePosterior = new double[nc, nf, nf];
+        var covars = new double[nc, nf, nf];
+        for (var c = 0; c < nc; c++)
+        {
+            dofPosterior[c] = dofPrior[c] + gs.Post[c];
+            for (var i = 0; i < nf; i++)
+                for (var j = 0; j < nf; j++)
+                {
+                    scalePosterior[c, i, j] = scalePrior[c, i, j]
+                        + gs.ObsObsT![c, i, j]
+                        + betaPrior[c] * meansPrior[c, i] * meansPrior[c, j]
+                        - betaPosterior[c] * meansPosterior[c, i] * meansPosterior[c, j];
+                    covars[c, i, j] = scalePosterior[c, i, j] / dofPosterior[c];
+                }
+        }
+        DofPosterior = dofPosterior;
+        ScalePosterior = scalePosterior;
+        Covars = covars;
+    }
+
+    /// <summary>Tied: one shared dof = dof_prior + sum of post, scale = scale_prior + the sum over states of (obs*obs.T + beta_prior * outer(means_prior) - beta_posterior * outer(means_posterior)), covars = scale / dof.</summary>
+    private void UpdateTiedCovariances(GaussianStatistics gs)
+    {
+        var nc = NComponents;
+        var nf = gs.Obs.GetLength(1);
+        var dofPrior = DofPriorValues!;
+        var scalePrior = ScalePriorValues!;
+        var betaPrior = BetaPriorValues!;
+        var meansPrior = MeansPriorValues!;
+        var betaPosterior = BetaPosterior!;
+        var meansPosterior = MeansPosterior!;
+        var mass = 0.0;
+        for (var c = 0; c < nc; c++)
+            mass += gs.Post[c];
+        var dofPosterior = new double[] { dofPrior[0] + mass };
+        var scalePosterior = new double[1, nf, nf];
+        var covars = new double[1, nf, nf];
+        for (var i = 0; i < nf; i++)
+            for (var j = 0; j < nf; j++)
+            {
+                var sum = 0.0;
+                for (var c = 0; c < nc; c++)
+                    sum += gs.ObsObsT![c, i, j]
+                        + betaPrior[c] * meansPrior[c, i] * meansPrior[c, j]
+                        - betaPosterior[c] * meansPosterior[c, i] * meansPosterior[c, j];
+                scalePosterior[0, i, j] = scalePrior[0, i, j] + sum;
+                covars[0, i, j] = scalePosterior[0, i, j] / dofPosterior[0];
+            }
+        DofPosterior = dofPosterior;
+        ScalePosterior = scalePosterior;
+        Covars = covars;
+    }
+
+    /// <summary>Diag: per-state dof = dof_prior + post, scale[c, f] = scale_prior[c, f] + obs2[c, f] + beta_prior[c] * means_prior[c, f]^2 - beta_posterior[c] * means_posterior[c, f]^2, covars = scale / dof.</summary>
+    private void UpdateDiagCovariances(GaussianStatistics gs)
+    {
+        var nc = NComponents;
+        var nf = gs.Obs.GetLength(1);
+        var dofPrior = DofPriorValues!;
+        var scalePrior = ScalePriorValues!;
+        var betaPrior = BetaPriorValues!;
+        var meansPrior = MeansPriorValues!;
+        var betaPosterior = BetaPosterior!;
+        var meansPosterior = MeansPosterior!;
+        var dofPosterior = new double[nc];
+        var scalePosterior = new double[nc, 1, nf];
+        var covars = new double[nc, 1, nf];
+        for (var c = 0; c < nc; c++)
+        {
+            dofPosterior[c] = dofPrior[c] + gs.Post[c];
+            for (var f = 0; f < nf; f++)
+            {
+                scalePosterior[c, 0, f] = scalePrior[c, 0, f]
+                    + gs.Obs2[c, f]
+                    + betaPrior[c] * meansPrior[c, f] * meansPrior[c, f]
+                    - betaPosterior[c] * meansPosterior[c, f] * meansPosterior[c, f];
+                covars[c, 0, f] = scalePosterior[c, 0, f] / dofPosterior[c];
+            }
+        }
+        DofPosterior = dofPosterior;
+        ScalePosterior = scalePosterior;
+        Covars = covars;
+    }
+
+    /// <summary>Spherical: per-state dof = dof_prior + post, scale[c] = scale_prior[c] + the mean over the features of (obs2[c, f] + beta_prior[c] * means_prior[c, f]^2 - beta_posterior[c] * means_posterior[c, f]^2), covars = scale / dof.</summary>
+    private void UpdateSphericalCovariances(GaussianStatistics gs)
+    {
+        var nc = NComponents;
+        var nf = gs.Obs.GetLength(1);
+        var dofPrior = DofPriorValues!;
+        var scalePrior = ScalePriorValues!;
+        var betaPrior = BetaPriorValues!;
+        var meansPrior = MeansPriorValues!;
+        var betaPosterior = BetaPosterior!;
+        var meansPosterior = MeansPosterior!;
+        var dofPosterior = new double[nc];
+        var scalePosterior = new double[nc, 1, 1];
+        var covars = new double[nc, 1, 1];
+        for (var c = 0; c < nc; c++)
+        {
+            dofPosterior[c] = dofPrior[c] + gs.Post[c];
+            var sum = 0.0;
+            for (var f = 0; f < nf; f++)
+                sum += gs.Obs2[c, f]
+                    + betaPrior[c] * meansPrior[c, f] * meansPrior[c, f]
+                    - betaPosterior[c] * meansPosterior[c, f] * meansPosterior[c, f];
+            scalePosterior[c, 0, 0] = scalePrior[c, 0, 0] + sum / nf;
+            covars[c, 0, 0] = scalePosterior[c, 0, 0] / dofPosterior[c];
+        }
+        DofPosterior = dofPosterior;
+        ScalePosterior = scalePosterior;
+        Covars = covars;
     }
 }
