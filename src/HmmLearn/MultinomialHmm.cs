@@ -12,7 +12,8 @@ public class MultinomialHmm : BaseHmm
 {
     /// <summary>
     /// Creates the model. <paramref name="nTrials"/>: if it has a value, the total count of every sample must equal it and sampling uses it;
-    /// if null, the totals may differ from sample to sample (sampling then needs NTrials to be set). The defaults are those of hmmlearn.
+    /// if null, the totals are free: each sample's own total is its number of trials (sampling then needs NTrials to be set).
+    /// See <see cref="NTrials"/>. The defaults are those of hmmlearn.
     /// </summary>
     public MultinomialHmm(int nComponents = 1, int? nTrials = null, double startProbPrior = 1.0, double transMatPrior = 1.0,
         DecoderAlgorithm algorithm = DecoderAlgorithm.Viterbi, int? randomState = null, int nIter = 10, double tol = 1e-2,
@@ -22,7 +23,11 @@ public class MultinomialHmm : BaseHmm
         NTrials = nTrials;
     }
 
-    /// <summary>Number of trials of every sample; null when the totals are free.</summary>
+    /// <summary>
+    /// Number of trials of every sample. With a value, every sample must total it (else <see cref="ArgumentException"/>) and Sample uses it.
+    /// Null means the totals are free: each sample's own total is its number of trials. That is valid for inference, for a fit and for a
+    /// model set by hand; only Sample needs a value (<see cref="InvalidOperationException"/> without it).
+    /// </summary>
     public int? NTrials { get; set; }
 
     /// <summary>Probability of each symbol in each state, shape (n_components, n_features); null until set or fitted.</summary>
@@ -51,6 +56,8 @@ public class MultinomialHmm : BaseHmm
     /// <summary>
     /// Base checks; EmissionProb must be non-null and (NComponents x NFeatures), else <see cref="ArgumentException"/>
     /// ("emissionprob_ must have shape (n_components, n_features)"); if NFeatures is null it becomes the number of columns; rows sum to 1.
+    /// Unlike hmmlearn ("n_trials must be set"), there is deliberately no NTrials rule: hmmlearn needs it only because its fit stores the
+    /// per-sample totals in n_trials, whereas here null means free totals and only Sample requires a value.
     /// </summary>
     protected override void Check()
     {
