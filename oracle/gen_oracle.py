@@ -27,7 +27,7 @@ logging.disable(logging.CRITICAL)
 np.seterr(all="ignore")
 
 from hmmlearn import _hmmc, _kl_divergence as kl, _utils, hmm, stats, utils, vhmm  # noqa: E402
-from hmmlearn.base import BaseHMM, ConvergenceMonitor  # noqa: E402
+from hmmlearn.base import BaseHMM, ConvergenceMonitor, VariationalBaseHMM  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden")
 RTOL = 1e-6
@@ -793,6 +793,52 @@ def gen_gmm():
 # Variational models
 # ---------------------------------------------------------------------------------------------------------------------
 
+class StubVHMM(VariationalBaseHMM):
+    """A VariationalBaseHMM whose observations ARE the log frame probabilities, for the plain and the subnormalized likelihoods."""
+
+    def _compute_log_likelihood(self, X):
+        return np.array(X, dtype=float)
+
+    def _compute_subnorm_log_likelihood(self, X):
+        return np.array(X, dtype=float)
+
+    def _get_n_fit_scalars_per_param(self):
+        nc = self.n_components
+        return {"s": nc - 1, "t": nc * (nc - 1)}
+
+
+def gen_variational_base():
+    fits = []
+    r = prng(111)
+    nc = 3
+    x_all = np.log(r.rand(30, nc) + 0.05)
+
+    def add_fit(name, constructor, init, x, lengths):
+        def make(impl):
+            m = StubVHMM(init_params="", implementation=impl, **constructor)
+            for key, value in init.items():
+                setattr(m, key + "_", np.array(value))
+            m.fit(x, lengths)
+            return fit_summary(m, x, lengths, {
+                "startprob_posterior": lambda h: h.startprob_posterior_, "transmat_posterior": lambda h: h.transmat_posterior_,
+                "startprob": lambda h: h.startprob_, "transmat": lambda h: h.transmat_})
+
+        fits.append({"name": name, "constructor": constructor, "init": init, "X": x, "lengths": lengths, "expected": both(make)})
+
+    init = {"startprob_prior": np.full(nc, 1 / nc), "startprob_posterior": np.array([1.2, 0.9, 0.9]),
+            "transmat_prior": np.full((nc, nc), 1 / nc), "transmat_posterior": stochastic(prng(112), nc, nc) * 10}
+    base = {"n_components": nc, "params": "st"}
+    add_fit("hundred-iterations-max", dict(base, n_iter=100, tol=1e-6), init, x_all, [10, 10, 10])
+    add_fit("ten-iterations", dict(base, n_iter=10, tol=1e-12), init, x_all, [30])
+    add_fit("unit-sequences", dict(base, n_iter=6, tol=1e-12), init, x_all[:8], [1, 2, 5])
+    add_fit("strong-priors", dict(base, n_iter=6, tol=1e-12),
+            dict(init, startprob_prior=np.full(nc, 5.0), transmat_prior=np.full((nc, nc), 3.0)), x_all, [15, 15])
+    # Without "s" the model has no startprob_ (hmmlearn only sets it in the "s" update): fit works, score is null.
+    add_fit("transitions-only", dict(base, n_iter=5, tol=1e-12, params="t"), init, x_all, [15, 15])
+    write("variational_base", {"module": "VariationalBaseHMM with a stub emission (observations are the log frame probabilities)",
+                               "tolerance": {"rtol": RTOL, "atol": ATOL}, "fit_cases": fits})
+
+
 def gen_variational_categorical():
     fits = []
     true = hmm.CategoricalHMM(3, init_params="", n_features=3)
@@ -964,6 +1010,7 @@ if __name__ == "__main__":
     gen_poisson()
     gen_gaussian()
     gen_gmm()
+    gen_variational_base()
     gen_variational_categorical()
     gen_variational_gaussian()
     gen_kl()
