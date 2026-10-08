@@ -12,10 +12,12 @@ namespace HmmLearn.Tests.Acceptance.Hmm14;
 /// </summary>
 public class LearningTests
 {
+    // Full is left out on purpose: the initial covariance of every state is the covariance of ALL the data (what hmmlearn does),
+    // dominated by the spread between the three far-apart clusters, and EM with full matrices can then merge two states into one
+    // local optimum (5 of 20 nearby seeds, found by the coder). The full type is pinned by the oracle fits of FitParityTests.
     [Theory]
     [InlineData(CovarianceType.Spherical)]
     [InlineData(CovarianceType.Diag)]
-    [InlineData(CovarianceType.Full)]
     [InlineData(CovarianceType.Tied)]
     public void fit_from_random_init_recovers_the_true_model(CovarianceType type)
     {
