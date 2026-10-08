@@ -426,9 +426,10 @@ public class EmissionTests
                 delta[c] = Math.Log(startProb[c]) + Math.Log(emissionProb[c, (int)x[offset, 0]]);
             for (var t = 1; t < length; t++)
             {
+                var next = new double[nc];
                 for (var j = 0; j < nc; j++)
                 {
-                    var bestIncoming = delta[0];
+                    var bestIncoming = delta[0] + Math.Log(transMat[0, j]);
                     var bestIncomingIndex = 0;
                     for (var i = 1; i < nc; i++)
                     {
@@ -440,8 +441,9 @@ public class EmissionTests
                         }
                     }
                     psi[t, j] = bestIncomingIndex;
-                    delta[j] = bestIncoming + Math.Log(emissionProb[j, (int)x[offset + t, 0]]);
+                    next[j] = bestIncoming + Math.Log(emissionProb[j, (int)x[offset + t, 0]]);
                 }
+                delta = next;
             }
             var best = delta[0];
             var bestIndex = 0;
