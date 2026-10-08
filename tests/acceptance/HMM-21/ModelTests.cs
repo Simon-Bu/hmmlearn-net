@@ -105,7 +105,7 @@ public class ModelTests
             for (var f = 0; f < 2; f++)
                 total[3 + i, f] = x2[i, f];
 
-        Close.Equal(model.Score(x1, new[] { 3 }) + model.Score(x2, new[] { 4 }), model.Score(total, new[] { 7 }),
+        Close.Equal(model.Score(x1, new[] { 3 }) + model.Score(x2, new[] { 4 }), model.Score(total, new[] { 3, 4 }),
             "score of the concatenated sequences");
     }
 
@@ -331,12 +331,7 @@ public class ModelTests
         }
     }
 
-    private static double[,,] Clone(double[,,] array)
-    {
-        var result = new double[array.GetLength(0), array.GetLength(1), array.GetLength(2)];
-        array.CopyTo(result, 0);
-        return result;
-    }
+    private static double[,,] Clone(double[,,] array) => (double[,,])array.Clone();
 
     /// <summary>An isotropic compact covariance: perState[c] on the diagonal (or the single value), 0 off the diagonal.</summary>
     private static double[,,] Compact(CovarianceType type, int nc, int nf, double[] perState) => type switch

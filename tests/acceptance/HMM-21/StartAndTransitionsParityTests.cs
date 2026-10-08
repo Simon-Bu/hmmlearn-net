@@ -140,17 +140,7 @@ public class StartAndTransitionsParityTests
         return result;
     }
 
-    private static double[,] Clone(double[,] array)
-    {
-        var result = new double[array.GetLength(0), array.GetLength(1)];
-        array.CopyTo(result, 0);
-        return result;
-    }
+    private static double[,] Clone(double[,] array) => (double[,])array.Clone();
 
-    private static double[,,] Clone(double[,,] array)
-    {
-        var result = new double[array.GetLength(0), array.GetLength(1), array.GetLength(2)];
-        array.CopyTo(result, 0);
-        return result;
-    }
+    private static double[,,] Clone(double[,,] array) => (double[,,])array.Clone();
 }
