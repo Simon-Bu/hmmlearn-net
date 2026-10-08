@@ -1,0 +1,94 @@
+# Ticket HMM-28. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-28
+title: AbstractHmm - inference rejects an observation matrix with a wrong number of columns
+repo: software-factory/hmmlearn-net
+base: main
+phase: J5
+type: bug
+level: standard
+objective: |
+  Fix the gap that the review of HMM-15 left open (follow-up issue #43) at its root, as that review recommended: a base-level check called by
+  the inference entry points of AbstractHmm. Today Score, ScoreSamples, Decode, Predict and PredictProba never compare the number of columns of x
+  with what the model expects. The pilot ran each case on the merged code:
+  - PoissonHmm (3 features): x with 2 columns returns a wrong score silently, x with 4 columns throws IndexOutOfRangeException;
+  - MultinomialHmm (3 features): x with 2 columns returns a wrong score silently, x with 4 columns throws IndexOutOfRangeException;
+  - CategoricalHmm (one symbol per sample): x with 2 columns ignores the second column silently.
+  hmmlearn raises a ValueError (numpy shape error) for such input; the port must throw the documented ArgumentException, whatever the model.
+  Gaussian models already do (Stats checks the shapes); the guard makes the rule uniform and explicit.
+  The coder writes the tests of this ticket and then the fix (no separate tests agent).
+scope:
+  writable:
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/CategoricalHmm.cs
+    - src/HmmLearn/VariationalCategoricalHmm.cs
+    - tests/acceptance/HMM-28/**
+  read_only:
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/AbstractHmm.cs (new, protected): the number of columns that inference accepts; NFeatures by default (null: not known, no check).
+  protected virtual int? ObservationColumns => NFeatures;
+  // CategoricalHmm and VariationalCategoricalHmm override it with 1 (one symbol per sample; their NFeatures is the number of symbols).
+
+  Semantics after the fix:
+  - Score, ScoreSamples and Decode (and so Predict and PredictProba) call Check() as today, then CheckObservations(x), then compare the number
+    of columns of x with ObservationColumns; a difference throws ArgumentException (exact type, parameter name "x") whose message gives both
+    numbers. Every model sets NFeatures in its Check(), so a hand-set model is covered as well as a fitted one.
+  - Valid input is unaffected: same results as today. A model whose NFeatures is still null after Check() (the test stubs of the base class) is
+    not checked.
+  - The XML summaries of Score, ScoreSamples and Decode state the rule.
+
+  Tests (written by the coder FIRST, in tests/acceptance/HMM-28/, namespace HmmLearn.Tests.Acceptance.Hmm28), exactly this file and class
+  (xunit 2 style attributes, `using Xunit` is global):
+  - ColumnCountTests.cs  -> class ColumnCountTests
+  Build small hand-set models (StartProb, TransMat and the emission parameters set, InitParams "") the way the inference tests of each model do:
+  tests/acceptance/HMM-10 (CategoricalHmm), HMM-11 (MultinomialHmm), HMM-13 (GaussianHmm), HMM-15 (PoissonHmm), HMM-16 (GmmHmm), HMM-20
+  (VariationalCategoricalHmm), HMM-21 and HMM-22 (VariationalGaussianHmm); read-only, copy the construction, not the oracle numbers.
+  For each model: x with one column too few and one too many throws ArgumentException (exact type) from Score, ScoreSamples, Decode, Predict
+  and PredictProba; x with the right number of columns still works (control: finite score). Required models: PoissonHmm, MultinomialHmm,
+  CategoricalHmm (right = 1 column; 2 columns must throw), GaussianHmm (diag), GmmHmm. VariationalCategoricalHmm and VariationalGaussianHmm:
+  include them if a hand-set model takes about 15 lines or less, otherwise skip them and say so in the summary of your report.
+constraints:
+  - "Order of work: write the test class, run its verify command on the UNFIXED code and check that it fails for the right reason (no exception, a wrong score or an IndexOutOfRangeException where an ArgumentException is expected; never a compile error or 'no test matches'); say in the summary of .factory/out/coder.json which tests failed before the fix; only then change the source."
+  - "Only the .NET base class library, MathNet.Numerics (already referenced) and the merged HmmLearn code: no new package."
+  - "Only the three source files and the folder tests/acceptance/HMM-28/ change. Public signatures do not change; every public member keeps an XML summary."
+  - "Valid input behaves exactly as before: the acceptance tests of every merged ticket must stay green (the whole suite is a verification). If an existing test breaks because it feeds inference a wrong number of columns on purpose, do not touch it: write a blocking question that names the test and stop."
+  - "The tests are deterministic and hand-written. Do not re-implement an algorithm inside a test: assert the exception type and, for the control, that the score is finite."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      For PoissonHmm, MultinomialHmm, CategoricalHmm, GaussianHmm and GmmHmm (and the variational models when included), x with a wrong number
+      of columns (one too few, one too many; for CategoricalHmm 2 columns) throws ArgumentException (exact type) from Score, ScoreSamples,
+      Decode, Predict and PredictProba, and x with the right number of columns still gives a finite score.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm28.ColumnCountTests'
+  - id: C2
+    text: |
+      The check lives in AbstractHmm (one virtual member and one call in each entry point), the categorical models override it with 1, valid
+      input is unaffected (the whole suite stays green) and the new tests are meaningful: at least one fails on the unfixed code and passes on
+      the fix (the reviewer checks this against the diff and the coder's summary); no test re-implements the code under test.
+  - id: C3
+    text: "The XML summaries of Score, ScoreSamples and Decode state the rule; the code stays readable: short methods, no dead code."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  coder: sonnet-5.5
+  reviewer: gpt-sol-6.1
+review:
+  max_rounds: 2
+context:
+  files:
+    - src/HmmLearn/AbstractHmm.cs
+    - src/HmmLearn/CategoricalHmm.cs
+    - src/HmmLearn/PoissonHmm.cs
+    - tests/acceptance/HMM-15/ValidationTests.cs
+    - tests/acceptance/HMM-11/InferenceParityTests.cs
