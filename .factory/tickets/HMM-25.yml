@@ -1,0 +1,83 @@
+# Ticket HMM-25. Schema: AnyMac/formats/schemas/ticket.schema.json
+version: 1
+id: HMM-25
+title: Hmmc - ComputeLogXiSum on a sequence without samples
+repo: software-factory/hmmlearn-net
+base: main
+phase: J5
+type: bug
+level: standard
+objective: |
+  Fix the inconsistency that the review of HMM-5 left open (follow-up issue #14) in src/HmmLearn/Hmmc.ViterbiXi.cs, which is merged. For
+  consistently empty input (fwdlattice, bwdlattice and the frame probabilities all (0, nc), transmat (nc, nc), i.e. n_samples = 0):
+  - ComputeScalingXiSum already runs its documented empty loop and returns the neutral matrix of zeros;
+  - ComputeLogXiSum reads fwdlattice[n_samples - 1, 0], that is row -1, and throws an undocumented IndexOutOfRangeException.
+  The C++ reference has undefined behavior at that spot. The documented sum runs over t = 0..n_samples-2, which is empty for 0 samples as
+  it is for 1 sample, so ComputeLogXiSum returns its neutral matrix too: an (nc, nc) matrix of -infinity, exactly what it returns for one
+  sample. The coder writes the tests of this ticket and then the fix (no separate tests agent).
+scope:
+  writable:
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+    - tests/acceptance/HMM-25/**
+  read_only:
+    - src/HmmLearn/Hmmc.ForwardBackward.cs
+    - src/HmmLearn/HmmLearn.csproj
+    - reference/**
+    - oracle/**
+    - tests/HmmLearn.Tests/**
+    - tests/acceptance/HMM-5/**
+    - HmmLearn.sln
+    - Directory.Build.props
+    - PROGRAM.md
+interface: |
+  // src/HmmLearn/Hmmc.ViterbiXi.cs: both methods exist and are merged; no signature change.
+  public static double[,] ComputeScalingXiSum(double[,] fwdlattice, double[,] transmat, double[,] bwdlattice, double[,] frameprob);
+  public static double[,] ComputeLogXiSum(double[,] fwdlattice, double[,] transmat, double[,] bwdlattice, double[,] logFrameprob);
+
+  Semantics after the fix:
+  - n_samples = 0 (all of fwdlattice, bwdlattice and the frame probabilities are (0, nc), transmat is (nc, nc)): ComputeLogXiSum returns a new
+    (nc, nc) matrix whose every entry is -infinity, without reading the last row of fwdlattice; ComputeScalingXiSum returns an (nc, nc)
+    matrix of zeros (unchanged).
+  - Shape errors keep throwing ArgumentException "shape mismatch" (for instance fwdlattice (0, 3) with frame probabilities (0, 2), or
+    fwdlattice (1, 2) with frame probabilities (0, 2)); 0 samples is not a shape error by itself.
+  - Every other behavior is unchanged (one sample and more). The XML summary of ComputeLogXiSum states the 0-sample result.
+
+  Tests (written by the coder FIRST, in tests/acceptance/HMM-25/, namespace HmmLearn.Tests.Acceptance.Hmm25), exactly this file and class
+  (xunit 2 style attributes, `using Xunit` is global):
+  - ZeroSampleXiSumTests.cs  -> class ZeroSampleXiSumTests
+  Read src/HmmLearn/Hmmc.ViterbiXi.cs and the tests of HMM-5 first (tests/acceptance/HMM-5/, read-only). Hand-written cases are enough, no
+  golden file is needed. Use nc = 1, 2 and 3. Asserting -infinity exactly is right here: it is the documented neutral element, not the
+  result of a computation that rounding could change.
+constraints:
+  - "Order of work: write the test class, run its verify command on the UNFIXED code and check that it fails for the right reason (the IndexOutOfRangeException of ComputeLogXiSum on 0 samples, never a compile error or 'no test matches'); say in the summary of .factory/out/coder.json which tests failed before the fix; only then change src/HmmLearn/Hmmc.ViterbiXi.cs."
+  - "Only the .NET base class library and the merged HmmLearn code: no new package."
+  - "Only src/HmmLearn/Hmmc.ViterbiXi.cs and the folder tests/acceptance/HMM-25/ change. Keep the public signatures; every public member keeps an XML summary."
+  - "Behavior for one sample and more does not change: the acceptance tests of HMM-5 and of every other merged ticket must stay green."
+  - "Run the verify commands exactly as written (dotnet run ...): they print each failing test with its message and stack. `dotnet test` cannot work in your sandbox (named pipes are blocked): do not spend time on it."
+  - "A case the criteria leave open is a minor ambiguity: choose the most reasonable reading, note it in an assumption and ask a non-blocking question."
+  - "In xunit, the string first argument of Assert.Throws<ArgumentException>(string, Action) is the expected ParamName, not a label: use Assert.Throws<T>(Action) (exact type) and put diagnostics elsewhere."
+  - "Work inside this worktree only: do not read the factory or anything outside the repository."
+criteria:
+  - id: C1
+    text: |
+      ComputeLogXiSum with 0 samples returns a new (nc, nc) matrix of -infinity (nc = 1, 2, 3) and does not throw; ComputeScalingXiSum with
+      0 samples returns an (nc, nc) matrix of zeros; shape errors on 0 samples still throw ArgumentException.
+    verify: 'dotnet run --project tests/HmmLearn.Tests -- --filter-class HmmLearn.Tests.Acceptance.Hmm25.ZeroSampleXiSumTests'
+  - id: C2
+    text: |
+      The new tests are meaningful: at least one fails on the unfixed code and passes on the fix (the reviewer checks this against the diff and
+      the coder's summary), and no test re-implements the code under test.
+  - id: C3
+    text: "The XML summary of ComputeLogXiSum states the 0-sample result; the code stays readable: short methods, no dead code."
+verifications:
+  - dotnet run --project tests/HmmLearn.Tests
+roles:
+  coder: sonnet-5.5
+  reviewer: gpt-sol-6.1
+review:
+  max_rounds: 2
+context:
+  files:
+    - src/HmmLearn/Hmmc.ViterbiXi.cs
+    - tests/acceptance/HMM-5/LogXiSumTests.cs
+    - tests/acceptance/HMM-5/ScalingXiSumTests.cs
