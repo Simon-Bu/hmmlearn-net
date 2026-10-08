@@ -41,6 +41,19 @@ public class ColumnCountTests
         2, 1.0, 1.0, 1.0, 3, DecoderAlgorithm.Viterbi, null, 10, 1e-2, false, "ste", "", Implementation.Log))
         .With(m => m.EmissionProb = new double[,] { { 0.5, 0.3, 0.2 }, { 0.1, 0.4, 0.5 } });
 
+    private static VariationalCategoricalHmm VariationalCategorical() => Set(new VariationalCategoricalHmm(
+        nComponents: 2, nFeatures: 3, initParams: ""))
+        .With(m =>
+        {
+            m.StartProbPriorValues = new[] { 1.0, 1.0 };
+            m.StartProbPosterior = new[] { 1.5, 2.5 };
+            m.TransMatPriorValues = new double[,] { { 1.0, 1.0 }, { 1.0, 1.0 } };
+            m.TransMatPosterior = new double[,] { { 2.0, 3.0 }, { 1.0, 4.0 } };
+            m.EmissionProbPriorValues = new double[,] { { 1.0, 1.0, 1.0 }, { 2.0, 2.0, 2.0 } };
+            m.EmissionProbPosterior = new double[,] { { 2.0, 1.0, 1.0 }, { 1.0, 3.0, 2.0 } };
+            m.EmissionProb = new double[,] { { 0.5, 0.25, 0.25 }, { 1.0 / 6, 0.5, 1.0 / 3 } };
+        });
+
     private static GaussianHmm Gaussian() => Set(new GaussianHmm(
         2, CovarianceType.Diag, 1e-3, 1.0, 1.0, 0, 0, 1e-2, 1,
         DecoderAlgorithm.Viterbi, null, 10, 1e-2, false, "stmc", "", Implementation.Log))
@@ -85,6 +98,9 @@ public class ColumnCountTests
 
     [Fact]
     public void categorical_rejects_two_columns() => AssertColumnCountChecked(Categorical(), 1, 2);
+
+    [Fact]
+    public void variational_categorical_rejects_two_columns() => AssertColumnCountChecked(VariationalCategorical(), 1, 2);
 
     [Fact]
     public void gaussian_rejects_a_wrong_number_of_columns() => AssertColumnCountChecked(Gaussian(), 3, 2, 4);
